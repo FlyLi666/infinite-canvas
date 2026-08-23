@@ -74,12 +74,23 @@ const YANLU_TEXT_MODEL_NAME = "gpt-5.6-sol";
 const YANLU_MANAGED_MODELS: ChannelModel[] = [
     { name: "gpt-image-2", capability: "image" },
     { name: "grok-imagine-image", capability: "image" },
+    { name: "grok-imagine-image-quality", capability: "image" },
     { name: "grok-imagine-edit", capability: "image" },
     { name: "grok-imagine-video-1.5", capability: "video" },
     { name: "gpt-5.6-sol", capability: "text" },
     { name: "gpt-5.6-luna", capability: "text" },
     { name: "gpt-5.6-terra", capability: "text" },
 ];
+const MODEL_CATALOG_KEYS: Record<string, string> = {
+    "gpt-image-2": "gptImage2",
+    "grok-imagine-image": "grokImagineImage",
+    "grok-imagine-image-quality": "grokImagineImageQuality",
+    "grok-imagine-edit": "grokImagineEdit",
+    "grok-imagine-video-1.5": "grokImagineVideo15",
+    "gpt-5.6-sol": "gpt56Sol",
+    "gpt-5.6-luna": "gpt56Luna",
+    "gpt-5.6-terra": "gpt56Terra",
+};
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -333,11 +344,22 @@ export function modelOptionName(value: string) {
     return decodeChannelModel(value)?.model || value;
 }
 
+export function modelCatalogDisplayName(technicalName: string) {
+    const key = MODEL_CATALOG_KEYS[technicalName];
+    return key ? i18n.t(`settingsPanels.model.catalog.${key}.name`) : technicalName;
+}
+
+export function modelOptionDescription(value: string) {
+    const key = MODEL_CATALOG_KEYS[modelOptionName(value)];
+    return key ? i18n.t(`settingsPanels.model.catalog.${key}.hint`) : "";
+}
+
 export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
-    if (!decoded) return value;
+    if (!decoded) return modelCatalogDisplayName(value);
     const channel = config.channels.find((item) => item.id === decoded.channelId);
-    return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
+    const displayName = modelCatalogDisplayName(decoded.model);
+    return channel ? `${displayName}（${channel.name}）` : displayName;
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {
