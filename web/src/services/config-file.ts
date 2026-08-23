@@ -40,8 +40,7 @@ export async function importAppConfig(file: File) {
     }
     if (data.app !== "infinite-canvas" || data.version !== 1 || !data.config || !data.webdav || !data.promptSources) throw new Error(i18n.t("config.invalidFile"));
     const current = useConfigStore.getState();
-    const managed = current.config.channels.find((channel) => channel.id === YANLU_CHANNEL_ID);
-    const channels = managed ? [managed] : retainPublicChannels(data.config.channels);
+    const channels = retainPublicChannels(current.config.channels);
     useConfigStore.setState({
         config: {
             ...data.config,

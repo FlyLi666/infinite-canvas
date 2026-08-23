@@ -166,6 +166,14 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                                         <div className="mt-1 text-xs text-stone-500">
                                             {t("config.channels.managedDescription")} · {t("config.channels.modelCount", { count: managedChannel.models.length })}
                                         </div>
+                                        {accessToken ? null : (
+                                            <>
+                                                <div className="mt-2 text-sm text-stone-500">{t("config.channels.signInHint")}</div>
+                                                <Button type="primary" className="mt-3" onClick={openLogin}>
+                                                    {t("auth.login")}
+                                                </Button>
+                                            </>
+                                        )}
                                     </div>
                                 ) : (
                                     <div className="rounded-lg border border-dashed border-stone-300 px-4 py-3 text-sm text-stone-500 dark:border-stone-700">

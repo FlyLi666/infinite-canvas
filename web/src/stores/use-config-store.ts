@@ -113,35 +113,41 @@ const MODEL_CATALOG_KEYS: Record<string, string> = {
 };
 
 export const defaultConfig: AiConfig = {
-    channelMode: "local",
-    baseUrl: OPENAI_BASE_URL,
+    channelMode: "remote",
+    baseUrl: YANLU_IMG_API_BASE_URL,
     apiKey: "",
     apiFormat: "openai",
     channels: [
         {
-            id: "default",
-            name: i18n.t("config.channels.defaultName"),
-            baseUrl: OPENAI_BASE_URL,
+            id: YANLU_CHANNEL_ID,
+            name: YANLU_CHANNEL_NAME,
+            baseUrl: YANLU_IMG_API_BASE_URL,
             apiKey: "",
             apiFormat: "openai",
-            models: [
-                { name: "gpt-image-2", capability: "image" },
-                { name: "grok-imagine-video-1.5", capability: "video" },
-                { name: "gpt-5.5", capability: "text" },
-            ],
+            models: YANLU_MANAGED_MODELS,
         },
     ],
-    model: "default::gpt-image-2",
-    imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video-1.5",
-    textModel: "default::gpt-5.5",
+    model: "yanlu::gpt-image-2",
+    imageModel: "yanlu::gpt-image-2",
+    videoModel: "yanlu::grok-imagine-video-1.5",
+    textModel: "yanlu::gpt-5.6-sol",
     videoSeconds: "6",
     vquality: "720",
     videoGenerateAudio: "true",
     videoWatermark: "false",
     systemPrompt: "",
     reasoningEffort: "auto",
-    models: ["default::gpt-image-2", "default::grok-imagine-video-1.5", "default::gpt-5.5"],
+    models: [
+        "yanlu::gpt-image-2",
+        "yanlu::grok-imagine-image-2.0",
+        "yanlu::grok-imagine-video-1.5",
+        "yanlu::seedance-2.0",
+        "yanlu::seedance-2.5",
+        "yanlu::grok-4.6",
+        "yanlu::gpt-5.6-sol",
+        "yanlu::gpt-5.6-luna",
+        "yanlu::gpt-5.6-terra",
+    ],
     quality: "auto",
     size: "1:1",
     background: "",
@@ -270,7 +276,7 @@ export const useConfigStore = create<ConfigStore>()(
                         auth.openLogin();
                         return;
                     }
-                    if (!get().config.channels.some((channel) => channel.id === YANLU_CHANNEL_ID)) void auth.provision().catch(() => undefined);
+                    if (!get().config.channels.find((channel) => channel.id === YANLU_CHANNEL_ID)?.apiKey.trim()) void auth.provision().catch(() => undefined);
                 }
                 set({ isConfigOpen: true, shouldPromptContinue, configTab });
             },
@@ -375,12 +381,8 @@ export function modelOptionDescription(value: string) {
     return key ? i18n.t(`settingsPanels.model.catalog.${key}.hint`) : "";
 }
 
-export function modelOptionLabel(config: AiConfig, value: string) {
-    const decoded = decodeChannelModel(value);
-    if (!decoded) return modelCatalogDisplayName(value);
-    const channel = config.channels.find((item) => item.id === decoded.channelId);
-    const displayName = modelCatalogDisplayName(decoded.model);
-    return channel ? `${displayName}（${channel.name}）` : displayName;
+export function modelOptionLabel(_config: AiConfig, value: string) {
+    return modelCatalogDisplayName(modelOptionName(value));
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {
@@ -496,11 +498,22 @@ export function buildApiUrl(baseUrl: string, path: string) {
     return `${proxyYanluBaseUrl(apiBaseUrl)}${path}`;
 }
 
-/** 对外只保留研路AI托管渠道；未登录时只留默认占位，丢掉用户自己加过的渠道。 */
+function createYanluCatalogChannel(keys?: { apiKey?: string; textApiKey?: string }) {
+    return createModelChannel({
+        id: YANLU_CHANNEL_ID,
+        name: YANLU_CHANNEL_NAME,
+        baseUrl: YANLU_IMG_API_BASE_URL,
+        apiKey: keys?.apiKey || "",
+        textApiKey: keys?.textApiKey,
+        apiFormat: "openai",
+        models: YANLU_MANAGED_MODELS,
+    });
+}
+
+/** 对外只保留研路AI托管渠道；未登录也先挂真目录，钥匙登录后再写入。 */
 export function retainPublicChannels(channels: ModelChannel[]): ModelChannel[] {
     const managed = channels.find((channel) => channel.id === YANLU_CHANNEL_ID);
-    if (managed) return [managed];
-    return [createModelChannel(defaultConfig.channels[0])];
+    return [createYanluCatalogChannel({ apiKey: managed?.apiKey, textApiKey: managed?.textApiKey })];
 }
 
 function isYanluModelValue(value: string | undefined) {
@@ -524,17 +537,8 @@ function yanluManagedSelection() {
     };
 }
 
-/** 已登录（存在 yanlu 渠道）时，默认三模型必须落在托管渠道；未登录维持本地 default 占位。 */
+/** 默认三模型必须落在托管真目录；旧的 default:: 占位回落到研路默认。 */
 function resolvePublicModelSelection(config: AiConfig, channels: ModelChannel[]) {
-    if (!channels.some((channel) => channel.id === YANLU_CHANNEL_ID)) {
-        return {
-            channelMode: "local" as const,
-            imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
-            videoModel: normalizeModelOptionValue(config.videoModel, channels),
-            textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
-            model: normalizeModelOptionValue(config.model || config.imageModel, channels),
-        };
-    }
     const defaults = yanluManagedSelection();
     const pick = (value: string | undefined, fallback: string) => {
         const normalized = normalizeModelOptionValue(value, channels);
@@ -560,18 +564,10 @@ function upsertYanluChannel(channels: ModelChannel[], managed: ModelChannel) {
 
 export function applyYanluManagedChannel(apiKey: string, options?: { adoptDefaults?: boolean; textApiKey?: string }) {
     useConfigStore.setState((state) => {
-        const managed = createModelChannel({
-            id: YANLU_CHANNEL_ID,
-            name: YANLU_CHANNEL_NAME,
-            baseUrl: YANLU_IMG_API_BASE_URL,
-            apiKey,
-            textApiKey: options?.textApiKey,
-            apiFormat: "openai",
-            models: YANLU_MANAGED_MODELS,
-        });
+        const managed = createYanluCatalogChannel({ apiKey, textApiKey: options?.textApiKey });
         const channels = retainPublicChannels(upsertYanluChannel(state.config.channels, managed));
         const config = { ...state.config, channels, models: modelOptionsFromChannels(channels) };
-        const selection = options?.adoptDefaults ? yanluManagedSelection() : resolvePublicModelSelection(config, channels);
+        const selection = options?.adoptDefaults && !isYanluModelValue(state.config.imageModel) ? yanluManagedSelection() : resolvePublicModelSelection(config, channels);
         return {
             config: {
                 ...config,
@@ -582,13 +578,11 @@ export function applyYanluManagedChannel(apiKey: string, options?: { adoptDefaul
     void applyLocalChannelOverride();
 }
 
-/** 退出登录时移除托管渠道；指向它的默认模型会被清空，下次生成动作会重新弹登录。 */
+/** 退出登录时清空托管钥匙，目录保留；下次生成仍会弹登录。 */
 export function removeYanluManagedChannel() {
     useConfigStore.setState((state) => {
-        if (!state.config.channels.some((channel) => channel.id === YANLU_CHANNEL_ID)) return {};
-        const channels = state.config.channels.filter((channel) => channel.id !== YANLU_CHANNEL_ID);
-        if (!channels.length) channels.push(createModelChannel(defaultConfig.channels[0]));
-        const config = { ...state.config, channels, models: modelOptionsFromChannels(channels) };
+        const channels = [createYanluCatalogChannel()];
+        const config = { ...state.config, channels, models: modelOptionsFromChannels(channels), apiKey: "" };
         return {
             config: {
                 ...config,
