@@ -263,3 +263,28 @@ export function grokVideoAspectRatio(size: string) {
         return Math.abs(value - current) < Math.abs(bestValue - current) ? ratio : best;
     });
 }
+
+const GROK_IMAGE_2K_PIXELS = new Set(["2048x2048", "2048x1152", "1152x2048"]);
+
+/** xAI/CPA only honor aspect_ratio + resolution. Do not send pixel `size`. */
+export function grokImageGeometry(size: string): { aspect_ratio: string; resolution: "1k" | "2k" } | undefined {
+    const value = (size || "").trim();
+    if (!value || value.toLowerCase() === "auto") return undefined;
+    const lowered = value.toLowerCase();
+    if (lowered === "2k" || lowered.endsWith("-2k")) {
+        return { aspect_ratio: grokVideoAspectRatio(value.replace(/-2k$/i, "") || "1:1"), resolution: "2k" };
+    }
+    if (lowered === "1k" || lowered.endsWith("-1k")) {
+        return { aspect_ratio: grokVideoAspectRatio(value.replace(/-1k$/i, "") || "1:1"), resolution: "1k" };
+    }
+    const pixels = value.match(/^(\d+)x(\d+)$/i);
+    if (pixels) {
+        const width = Number(pixels[1]);
+        const height = Number(pixels[2]);
+        const key = `${width}x${height}`;
+        const resolution = GROK_IMAGE_2K_PIXELS.has(key) || Math.max(width, height) >= 2048 ? "2k" : "1k";
+        return { aspect_ratio: grokVideoAspectRatio(key), resolution };
+    }
+    if (value.includes(":")) return { aspect_ratio: grokVideoAspectRatio(value), resolution: "1k" };
+    return undefined;
+}

@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { modelCapabilities } from "@/lib/model-capabilities";
+import { capabilityModelName, modelCapabilities } from "@/lib/model-capabilities";
 import { boolConfig, type AiConfig } from "@/stores/use-config-store";
 
 const sizeOptions = [
@@ -19,7 +19,7 @@ const sizeOptions = [
 
 const grokCaps = modelCapabilities("grok-imagine-video-1.5");
 
-export const videoResolutionOptions = grokCaps.videoResolutions.map((value) => ({ value, label: `${value}p` }));
+export const videoResolutionOptions = grokCaps.videoResolutions.map((value) => ({ value, get label() { return videoResolutionLabel(value, "grok-imagine-video-1.5"); } }));
 export const videoSizeOptions = sizeOptions.map((item) => ({ value: item.value, get label() { return i18n.t(`settingsPanels.video.sizes.${item.labelKey}`); } }));
 export const videoSecondOptions = grokCaps.videoSeconds.map((value) => String(value));
 
@@ -34,7 +34,7 @@ type VideoSettingsPanelProps = {
 export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
     const { t } = useTranslation();
     const caps = modelCapabilities(config.model || config.videoModel);
-    const visibleResolutions = caps.videoResolutions.map((value) => ({ value, label: `${value}p` }));
+    const visibleResolutions = caps.videoResolutions.map((value) => ({ value, label: videoResolutionLabel(value, config.model || config.videoModel) }));
     const visibleSeconds = caps.videoSeconds;
     const seconds = config.videoSeconds || "6";
     const size = normalizeVideoSizeValue(config.size);
@@ -123,8 +123,15 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
     );
 }
 
-export function videoResolutionLabel(value: string) {
-    return `${normalizeVideoResolutionValue(value)}p`;
+export function videoResolutionLabel(value: string, model?: string) {
+    const normalized = normalizeVideoResolutionValue(value);
+    const name = capabilityModelName(model || "").toLowerCase();
+    if (name.includes("grok-imagine-video") || name.startsWith("seedance-")) {
+        if (normalized === "480") return i18n.t("settingsPanels.common.low");
+        if (normalized === "720") return i18n.t("settingsPanels.common.medium");
+        if (normalized === "1080") return i18n.t("settingsPanels.common.high");
+    }
+    return `${normalized}p`;
 }
 
 export function videoSizeLabel(value: string) {

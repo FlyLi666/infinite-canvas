@@ -62,10 +62,41 @@ export async function setImageBlob(storageKey: string, blob: Blob) {
     return url;
 }
 
+const REMOTE_IMAGE_FETCH_MS = 12_000;
+
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
-    const url = image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
+    // 本地 blob 优先：改成 url 回包后 content 常是 https，不能再抢在 storageKey 前面去跨域 fetch。
+    const localUrl = await resolveImageUrl(image.storageKey);
+    if (localUrl) return blobToDataUrl(await (await fetch(localUrl)).blob());
+    const url = image.dataUrl || image.url || "";
     if (!url || url.startsWith("data:")) return url;
+    if (/^https?:/i.test(url)) return url;
     return blobToDataUrl(await (await fetch(url)).blob());
+}
+
+export async function fetchRemoteImageAsDataUrl(url: string, signal?: AbortSignal) {
+    const blob = await fetchBlobWithTimeout(url, signal);
+    if (!blob.type.startsWith("image/") && blob.type !== "application/octet-stream") {
+        throw new Error(i18n.t("common.imageReadFailed"));
+    }
+    return blobToDataUrl(blob);
+}
+
+async function fetchBlobWithTimeout(url: string, signal?: AbortSignal) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), REMOTE_IMAGE_FETCH_MS);
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error(i18n.t("common.imageReadFailed"));
+        return await response.blob();
+    } catch {
+        throw new Error(i18n.t("common.imageReadFailed"));
+    } finally {
+        window.clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+    }
 }
 
 export async function deleteStoredImages(keys: Iterable<string>) {

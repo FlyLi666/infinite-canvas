@@ -3,7 +3,7 @@ import axios from "axios";
 import i18n from "@/i18n";
 import { humanizeGenerationError } from "@/lib/generation-errors";
 import { isYanluImageApiBaseUrl } from "@/lib/yanlu-endpoints";
-import { clampImageCount, fallbackImageQualityForModel, modelCapabilities } from "@/lib/model-capabilities";
+import { clampImageCount, fallbackImageQualityForModel, grokImageGeometry, isGrokImagineImageModel, modelCapabilities } from "@/lib/model-capabilities";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, useConfigStore, YANLU_CHANNEL_ID, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { refreshYanluBalance, useAuthStore } from "@/stores/use-auth-store";
 import { useImageTaskStore } from "@/stores/use-image-task-store";
@@ -11,7 +11,7 @@ import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
-import { imageToDataUrl } from "@/services/image-storage";
+import { fetchRemoteImageAsDataUrl, imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
@@ -301,6 +301,10 @@ function parseImagePayload(payload: ImageApiResponse) {
             .filter((value): value is string => Boolean(value))
             .map((dataUrl) => ({ id: nanoid(), dataUrl }));
 
+    if (images.length === 0 && typeof payload.url === "string" && payload.url) {
+        return [{ id: nanoid(), dataUrl: payload.url }];
+    }
+
     if (images.length === 0) {
         // Check whether the response contains data in an unrecognized format.
         const rawKeys = Object.keys(payload).filter((k) => k !== "code" && k !== "msg" && k !== "error");
@@ -312,7 +316,7 @@ function parseImagePayload(payload: ImageApiResponse) {
     return images;
 }
 
-const IMAGE_TASK_WAIT = new Set(["", "pending", "queued", "processing", "in_progress", "running"]);
+const IMAGE_TASK_WAIT = new Set(["pending", "queued", "processing", "in_progress", "running"]);
 
 function extractImageTaskId(payload: ImageApiResponse | undefined) {
     const id = payload?.id?.trim() || "";
@@ -965,7 +969,8 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
         }
     }
     const quality = caps.quality ? fallbackImageQualityForModel(selectedModel, normalizeQuality(config.quality) || config.quality) || undefined : undefined;
-    const requestSize = resolveRequestSize(quality, config.size);
+    const grokGeometry = isGrokImagineImageModel(selectedModel) ? grokImageGeometry(config.size) : undefined;
+    const requestSize = grokGeometry ? undefined : resolveRequestSize(quality, config.size);
     const background = caps.transparentBackground ? normalizeBackground(config.background) : undefined;
     try {
         return await runManagedImageRequest(
@@ -980,7 +985,7 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
                                 prompt: withSystemPrompt(activeConfig, prompt),
                                 n,
                                 ...(quality ? { quality } : {}),
-                                ...(requestSize ? { size: requestSize } : {}),
+                                ...(grokGeometry ? grokGeometry : requestSize ? { size: requestSize } : {}),
                                 ...(background ? { background } : {}),
                                 response_format: "url",
                                 output_format: IMAGE_OUTPUT_FORMAT,
@@ -1004,6 +1009,73 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
     } catch (error) {
         throw asImageGenerationError(error, apiText("requestFailed"));
     }
+}
+
+async function resolveEditImageUrl(image: ReferenceImage) {
+    const resolved = await imageToDataUrl(image);
+    if (resolved) return resolved;
+    throw new Error(i18n.t("common.imageReadFailed"));
+}
+
+async function resolveEditImageFile(image: ReferenceImage, signal?: AbortSignal) {
+    const resolved = await imageToDataUrl(image);
+    if (resolved.startsWith("data:")) return dataUrlToFile({ ...image, dataUrl: resolved });
+    if (/^https?:/i.test(resolved)) {
+        return dataUrlToFile({ ...image, dataUrl: await fetchRemoteImageAsDataUrl(resolved, signal) });
+    }
+    throw new Error(i18n.t("common.imageReadFailed"));
+}
+
+async function buildGrokEditPayload(
+    model: string,
+    prompt: string,
+    n: number,
+    quality: string | undefined,
+    geometry: { aspect_ratio: string; resolution: "1k" | "2k" } | undefined,
+    background: string | undefined,
+    references: ReferenceImage[],
+    mask?: ReferenceImage,
+) {
+    const urls = await Promise.all(references.map(resolveEditImageUrl));
+    const image = urls.length === 1 ? { url: urls[0], type: "image_url" } : urls.map((url) => ({ url, type: "image_url" }));
+    return {
+        model,
+        prompt,
+        n,
+        response_format: "url",
+        output_format: IMAGE_OUTPUT_FORMAT,
+        image,
+        ...(mask ? { mask: { url: await resolveEditImageUrl(mask), type: "image_url" } } : {}),
+        ...(quality ? { quality } : {}),
+        ...(geometry || {}),
+        ...(background ? { background } : {}),
+    };
+}
+
+async function buildOpenAIEditForm(
+    model: string,
+    prompt: string,
+    n: number,
+    quality: string | undefined,
+    requestSize: string | undefined,
+    background: string | undefined,
+    references: ReferenceImage[],
+    mask: ReferenceImage | undefined,
+    signal?: AbortSignal,
+) {
+    const formData = new FormData();
+    formData.set("model", model);
+    formData.set("prompt", prompt);
+    formData.set("n", String(n));
+    formData.set("response_format", "url");
+    formData.set("output_format", IMAGE_OUTPUT_FORMAT);
+    if (quality) formData.set("quality", quality);
+    if (requestSize) formData.set("size", requestSize);
+    if (background) formData.set("background", background);
+    const files = await Promise.all(references.map((image) => resolveEditImageFile(image, signal)));
+    files.forEach((file) => formData.append("image", file));
+    if (mask) formData.set("mask", await resolveEditImageFile(mask, signal));
+    return formData;
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
@@ -1051,26 +1123,13 @@ async function requestEditInner(config: AiConfig, prompt: string, references: Re
     }
 
     const quality = caps.quality ? fallbackImageQualityForModel(selectedModel, normalizeQuality(config.quality) || config.quality) || undefined : undefined;
-    const requestSize = resolveRequestSize(quality, config.size);
+    const grokGeometry = isGrokImagineImageModel(selectedModel) ? grokImageGeometry(config.size) : undefined;
+    const requestSize = grokGeometry ? undefined : resolveRequestSize(quality, config.size);
     const background = caps.transparentBackground ? normalizeBackground(config.background) : undefined;
-    const formData = new FormData();
-    formData.set("model", requestConfig.model);
-    formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
-    formData.set("n", String(n));
-    formData.set("response_format", "url");
-    formData.set("output_format", IMAGE_OUTPUT_FORMAT);
-    if (quality) {
-        formData.set("quality", quality);
-    }
-    if (requestSize) {
-        formData.set("size", requestSize);
-    }
-    if (background) {
-        formData.set("background", background);
-    }
-    const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
-    files.forEach((file) => formData.append("image", file));
-    if (mask) formData.set("mask", dataUrlToFile(mask));
+    const grokEdit = Boolean(grokGeometry) || isGrokImagineImageModel(selectedModel);
+    const payload = grokEdit
+        ? await buildGrokEditPayload(requestConfig.model, withSystemPrompt(requestConfig, requestPrompt), n, quality, grokGeometry, background, references, mask)
+        : await buildOpenAIEditForm(requestConfig.model, withSystemPrompt(requestConfig, requestPrompt), n, quality, requestSize, background, references, mask, options?.signal);
 
     try {
         return await runManagedImageRequest(
@@ -1078,8 +1137,8 @@ async function requestEditInner(config: AiConfig, prompt: string, references: Re
             async (activeConfig) => {
                 const response = await submitWithBusyRetry(
                     () =>
-                        axios.post<ImageApiResponse>(aiApiUrl(activeConfig, "/images/edits"), formData, {
-                            headers: aiHeaders(activeConfig),
+                        axios.post<ImageApiResponse>(aiApiUrl(activeConfig, "/images/edits"), payload, {
+                            headers: grokEdit ? aiHeaders(activeConfig, "application/json") : aiHeaders(activeConfig),
                             signal: options?.signal,
                             validateStatus: (status) => status >= 200 && status < 300,
                         }),
