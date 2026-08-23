@@ -7,6 +7,8 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- Top-bar version: the homepage and canvas chrome should no longer show a version number or open the release-notes modal, and the page should not fetch the upstream VERSION / CHANGELOG.
+
 - Cold-start managed defaults: clear site storage, sign in, then **reload the page** before opening a new canvas. The three defaults must be `yanlu::gpt-5.6-sol`, `yanlu::gpt-image-2`, and `yanlu::grok-imagine-video-1.5` with the managed channel (not `default::` / local). Clicking Generate immediately must start the request and must not open Settings. A signed-out local user should still see the previous `default::` placeholders.
 
 - New generation-config node after sign-in and reload: adding a config node on the canvas should show the Yanlu AI models in the picker immediately (not Default provider / `gpt-5.5`). Switching to Text must show `gpt-5.6-sol（研路AI）`. Clicking Generate must start the request without opening Settings; opening and closing Settings must not be required to correct the dropdown.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { App } from "antd";
 import { useTranslation } from "react-i18next";
 import { APP_VERSION } from "@/constant/env";
@@ -70,10 +70,6 @@ export function useVersionCheck() {
         [currentVersion, localReleases, message, t],
     );
 
-    useEffect(() => {
-        void checkLatestVersion();
-    }, [checkLatestVersion]);
-
     const openReleaseModal = useCallback(() => {
         setOpen(true);
         void checkLatestRelease();
@@ -87,6 +83,7 @@ export function useVersionCheck() {
         releases,
         checking,
         hasNewVersion,
+        checkLatestVersion,
         checkLatestRelease,
     };
 }
