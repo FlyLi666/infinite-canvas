@@ -7,9 +7,9 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
-- Cold-start managed defaults: clear site storage, sign in, then open a new canvas. The three defaults must be `yanlu::gpt-5.6-sol`, `yanlu::gpt-image-2`, and `yanlu::grok-imagine-video-1.5` with the managed channel (not `default::` / local). Clicking Generate immediately must start the request and must not open Settings. A signed-out local user should still see the previous `default::` placeholders.
+- Cold-start managed defaults: clear site storage, sign in, then **reload the page** before opening a new canvas. The three defaults must be `yanlu::gpt-5.6-sol`, `yanlu::gpt-image-2`, and `yanlu::grok-imagine-video-1.5` with the managed channel (not `default::` / local). Clicking Generate immediately must start the request and must not open Settings. A signed-out local user should still see the previous `default::` placeholders.
 
-- New generation-config node after sign-in: adding a config node on the canvas should show the Yanlu AI models in the picker immediately (not Default provider / `gpt-5.5`). Clicking Generate must start the request without opening Settings; opening and closing Settings must not be required to correct the dropdown.
+- New generation-config node after sign-in and reload: adding a config node on the canvas should show the Yanlu AI models in the picker immediately (not Default provider / `gpt-5.5`). Switching to Text must show `gpt-5.6-sol（研路AI）`. Clicking Generate must start the request without opening Settings; opening and closing Settings must not be required to correct the dropdown.
 
 - Top-bar balance after chat-path generation: generate once each with Grok image, Grok video, and text (`/__rigel-ai/chat`). When the request finishes (success or failure), the account chip should refresh to the new USD balance without waiting for window focus. GPT Image 2 should keep refreshing as before.
 

@@ -65,6 +65,21 @@ export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+// persist.merge runs synchronously inside create(); these must be initialized first.
+export const YANLU_CHANNEL_ID = "yanlu";
+export const YANLU_CHANNEL_NAME = "研路AI";
+const YANLU_IMAGE_MODEL_NAME = "gpt-image-2";
+const YANLU_VIDEO_MODEL_NAME = "grok-imagine-video-1.5";
+const YANLU_TEXT_MODEL_NAME = "gpt-5.6-sol";
+const YANLU_MANAGED_MODELS: ChannelModel[] = [
+    { name: "gpt-image-2", capability: "image" },
+    { name: "grok-imagine-image", capability: "image" },
+    { name: "grok-imagine-edit", capability: "image" },
+    { name: "grok-imagine-video-1.5", capability: "video" },
+    { name: "gpt-5.6-sol", capability: "text" },
+    { name: "gpt-5.6-luna", capability: "text" },
+    { name: "gpt-5.6-terra", capability: "text" },
+];
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -438,28 +453,12 @@ export function buildApiUrl(baseUrl: string, path: string) {
     return `${proxyYanluBaseUrl(apiBaseUrl)}${path}`;
 }
 
-export const YANLU_CHANNEL_ID = "yanlu";
-export const YANLU_CHANNEL_NAME = "研路AI";
-
 /** 对外只保留研路AI托管渠道；未登录时只留默认占位，丢掉用户自己加过的渠道。 */
 export function retainPublicChannels(channels: ModelChannel[]): ModelChannel[] {
     const managed = channels.find((channel) => channel.id === YANLU_CHANNEL_ID);
     if (managed) return [managed];
     return [createModelChannel(defaultConfig.channels[0])];
 }
-
-const YANLU_IMAGE_MODEL_NAME = "gpt-image-2";
-const YANLU_VIDEO_MODEL_NAME = "grok-imagine-video-1.5";
-const YANLU_TEXT_MODEL_NAME = "gpt-5.6-sol";
-const YANLU_MANAGED_MODELS: ChannelModel[] = [
-    { name: "gpt-image-2", capability: "image" },
-    { name: "grok-imagine-image", capability: "image" },
-    { name: "grok-imagine-edit", capability: "image" },
-    { name: "grok-imagine-video-1.5", capability: "video" },
-    { name: "gpt-5.6-sol", capability: "text" },
-    { name: "gpt-5.6-luna", capability: "text" },
-    { name: "gpt-5.6-terra", capability: "text" },
-];
 
 function isYanluModelValue(value: string | undefined) {
     return (value || "").startsWith(`${YANLU_CHANNEL_ID}${CHANNEL_MODEL_SEPARATOR}`);
