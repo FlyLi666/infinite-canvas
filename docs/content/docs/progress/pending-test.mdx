@@ -7,6 +7,10 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- Cold-start managed defaults: clear site storage, sign in, then open a new canvas. The three defaults must be `yanlu::gpt-5.6-sol`, `yanlu::gpt-image-2`, and `yanlu::grok-imagine-video-1.5` with the managed channel (not `default::` / local). Clicking Generate immediately must start the request and must not open Settings. A signed-out local user should still see the previous `default::` placeholders.
+
+- Top-bar balance after chat-path generation: generate once each with Grok image, Grok video, and text (`/__rigel-ai/chat`). When the request finishes (success or failure), the account chip should refresh to the new USD balance without waiting for window focus. GPT Image 2 should keep refreshing as before.
+
 - Local-only storage notice: every page should show a top banner that images, videos, and canvases stay in the current browser; the image and video workbench result headings should repeat the same notice; a successful generation toast should remind the user to download; the My Assets description should say assets are browser-local.
 
 - Production site `https://canvas.flyli.cn`: the homepage title is RIGEL 创作画布; `/canvas` should open the SPA without a 404; signing in from this origin should succeed (no CORS/preflight failure); after sign-in, generate once each with GPT Image 2, Grok Image, Grok Image Edit, Grok Video 1.5, and text. If GPT Image 2 rejects a prompt for copyright or safety, the toast and node should show the upstream reason instead of “retry or simplify the prompt” or only “All image generation failed”.

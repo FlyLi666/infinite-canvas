@@ -50,6 +50,14 @@ let refreshPromise: Promise<boolean> | null = null;
 let provisionPromise: Promise<void> | null = null;
 let profilePromise: Promise<void> | null = null;
 
+/** 生成结束（成功或失败）后拉一次资料刷新顶栏余额；若已有进行中的拉取，等它结束再拉，避免快请求吃到扣费前的旧余额。 */
+export function refreshYanluBalance() {
+    if (!useAuthStore.getState().accessToken) return;
+    void Promise.resolve(profilePromise).finally(() => {
+        void useAuthStore.getState().fetchProfile();
+    });
+}
+
 /** 带登录态调用：token 过期先刷新；调用中遇到登录态失效则刷新后重试一次，仍失败就登出。 */
 async function withValidToken<T>(run: (token: string) => Promise<T>): Promise<T> {
     const store = useAuthStore.getState();

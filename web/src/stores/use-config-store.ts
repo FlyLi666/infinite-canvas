@@ -169,7 +169,7 @@ export function resolveModelForCapability(config: AiConfig, currentModel: string
     const fallbackModel = capability === "image" ? defaultConfig.imageModel : capability === "video" ? defaultConfig.videoModel : defaultConfig.textModel;
     if (currentModel && modelMatchesCapability(config, currentModel, capability)) return currentModel;
     if (defaultModel && modelMatchesCapability(config, defaultModel, capability)) return defaultModel;
-    return fallbackModel;
+    return yanluManagedModel(capability) && config.channels.some((channel) => channel.id === YANLU_CHANNEL_ID) ? yanluManagedModel(capability) : fallbackModel;
 }
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
@@ -244,13 +244,10 @@ export const useConfigStore = create<ConfigStore>()(
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
                     config: {
                         ...config,
-                        channelMode: "local",
+                        ...resolvePublicModelSelection(config, channels),
                         apiFormat: normalizeApiFormat(config.apiFormat),
                         channels,
                         models,
-                        imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
-                        videoModel: normalizeModelOptionValue(config.videoModel, channels),
-                        textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
                         reasoningEffort: config.reasoningEffort || "auto",
                         videoSeconds: config.videoSeconds || "6",
                         vquality: config.vquality || "720",
@@ -266,7 +263,8 @@ export const useConfigStore = create<ConfigStore>()(
 
 export function useEffectiveConfig() {
     const config = useConfigStore((state) => state.config);
-    return useMemo(() => ({ ...config, channelMode: "local" as const }), [config]);
+    const channelMode = config.channels.some((channel) => channel.id === YANLU_CHANNEL_ID) ? ("remote" as const) : ("local" as const);
+    return useMemo(() => ({ ...config, channelMode }), [channelMode, config]);
 }
 
 /** Normalize a mixed list of raw model names or model objects into deduped ChannelModel entries. */
@@ -461,10 +459,56 @@ const YANLU_MANAGED_MODELS: ChannelModel[] = [
     { name: "gpt-5.6-terra", capability: "text" },
 ];
 
+function isYanluModelValue(value: string | undefined) {
+    return (value || "").startsWith(`${YANLU_CHANNEL_ID}${CHANNEL_MODEL_SEPARATOR}`);
+}
+
+function yanluManagedModel(capability: ModelCapability) {
+    if (capability === "image") return encodeChannelModel(YANLU_CHANNEL_ID, YANLU_IMAGE_MODEL_NAME);
+    if (capability === "video") return encodeChannelModel(YANLU_CHANNEL_ID, YANLU_VIDEO_MODEL_NAME);
+    return encodeChannelModel(YANLU_CHANNEL_ID, YANLU_TEXT_MODEL_NAME);
+}
+
+function yanluManagedSelection() {
+    const imageModel = yanluManagedModel("image");
+    return {
+        channelMode: "remote" as const,
+        imageModel,
+        videoModel: yanluManagedModel("video"),
+        textModel: yanluManagedModel("text"),
+        model: imageModel,
+    };
+}
+
+/** 已登录（存在 yanlu 渠道）时，默认三模型必须落在托管渠道；未登录维持本地 default 占位。 */
+function resolvePublicModelSelection(config: AiConfig, channels: ModelChannel[]) {
+    if (!channels.some((channel) => channel.id === YANLU_CHANNEL_ID)) {
+        return {
+            channelMode: "local" as const,
+            imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
+            videoModel: normalizeModelOptionValue(config.videoModel, channels),
+            textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
+            model: normalizeModelOptionValue(config.model || config.imageModel, channels),
+        };
+    }
+    const defaults = yanluManagedSelection();
+    const pick = (value: string | undefined, fallback: string) => {
+        const normalized = normalizeModelOptionValue(value, channels);
+        return isYanluModelValue(normalized) ? normalized : fallback;
+    };
+    return {
+        channelMode: "remote" as const,
+        imageModel: pick(config.imageModel || config.model, defaults.imageModel),
+        videoModel: pick(config.videoModel, defaults.videoModel),
+        textModel: pick(config.textModel || config.model, defaults.textModel),
+        model: pick(config.model || config.imageModel, defaults.model),
+    };
+}
+
 /**
  * 登录后写入 / 覆盖研路AI托管渠道（id 固定 yanlu，同名渠道一并覆盖），密钥由账号自动开通。
- * 默认模型仅在显式登录（adoptDefaults）或当前生图/视频/文本模型不可用时切到托管模型，
- * 保证本地 override 选好的模型不会在每次启动时被抢走。
+ * 默认模型仅在显式登录（adoptDefaults）或当前选择不是 yanlu:: 时切到托管模型，
+ * 保证用户在托管渠道内换过的模型不会在每次启动时被抢走。
  */
 function upsertYanluChannel(channels: ModelChannel[], managed: ModelChannel) {
     return [managed, ...channels.filter((channel) => channel.id !== YANLU_CHANNEL_ID)];
@@ -483,18 +527,11 @@ export function applyYanluManagedChannel(apiKey: string, options?: { adoptDefaul
         });
         const channels = retainPublicChannels(upsertYanluChannel(state.config.channels, managed));
         const config = { ...state.config, channels, models: modelOptionsFromChannels(channels) };
-        const managedImage = encodeChannelModel(YANLU_CHANNEL_ID, YANLU_IMAGE_MODEL_NAME);
-        const managedVideo = encodeChannelModel(YANLU_CHANNEL_ID, YANLU_VIDEO_MODEL_NAME);
-        const managedText = encodeChannelModel(YANLU_CHANNEL_ID, YANLU_TEXT_MODEL_NAME);
-        const adoptImage = options?.adoptDefaults || !isAiConfigReady(config, config.imageModel);
-        const adoptVideo = options?.adoptDefaults || !isAiConfigReady(config, config.videoModel);
-        const adoptText = options?.adoptDefaults || !isAiConfigReady(config, config.textModel);
+        const selection = options?.adoptDefaults ? yanluManagedSelection() : resolvePublicModelSelection(config, channels);
         return {
             config: {
                 ...config,
-                ...(adoptImage ? { imageModel: managedImage, model: managedImage } : {}),
-                ...(adoptVideo ? { videoModel: managedVideo } : {}),
-                ...(adoptText ? { textModel: managedText } : {}),
+                ...selection,
             },
         };
     });
@@ -511,10 +548,7 @@ export function removeYanluManagedChannel() {
         return {
             config: {
                 ...config,
-                model: normalizeModelOptionValue(config.model, channels),
-                imageModel: normalizeModelOptionValue(config.imageModel, channels),
-                videoModel: normalizeModelOptionValue(config.videoModel, channels),
-                textModel: normalizeModelOptionValue(config.textModel, channels),
+                ...resolvePublicModelSelection(config, channels),
             },
         };
     });
@@ -559,6 +593,7 @@ export async function applyLocalChannelOverride() {
             const imageValue = local.imageModel ? normalizeModelOptionValue(local.imageModel, mergedChannels) : "";
             const videoValue = local.videoModel ? normalizeModelOptionValue(local.videoModel, mergedChannels) : "";
             const textValue = local.textModel ? normalizeModelOptionValue(local.textModel, mergedChannels) : "";
+            const keepManagedModel = (value: string, current: string) => (managedChannel && value && !isYanluModelValue(value) ? current : value || current);
             return {
                 config: {
                     ...state.config,
@@ -567,10 +602,16 @@ export async function applyLocalChannelOverride() {
                     apiFormat: "openai",
                     channels: mergedChannels,
                     models: modelOptionsFromChannels(mergedChannels),
-                    imageModel: imageValue || state.config.imageModel,
-                    videoModel: videoValue || state.config.videoModel,
-                    textModel: textValue || state.config.textModel,
-                    model: imageValue || state.config.model,
+                    ...resolvePublicModelSelection(
+                        {
+                            ...state.config,
+                            imageModel: keepManagedModel(imageValue, state.config.imageModel),
+                            videoModel: keepManagedModel(videoValue, state.config.videoModel),
+                            textModel: keepManagedModel(textValue, state.config.textModel),
+                            model: keepManagedModel(imageValue, state.config.model),
+                        },
+                        mergedChannels,
+                    ),
                 },
             };
         });

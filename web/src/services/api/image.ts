@@ -4,7 +4,7 @@ import i18n from "@/i18n";
 import { humanizeGenerationError } from "@/lib/generation-errors";
 import { isYanluImageApiBaseUrl } from "@/lib/yanlu-endpoints";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, useConfigStore, YANLU_CHANNEL_ID, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
-import { useAuthStore } from "@/stores/use-auth-store";
+import { refreshYanluBalance, useAuthStore } from "@/stores/use-auth-store";
 import { useImageTaskStore } from "@/stores/use-image-task-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
@@ -460,7 +460,6 @@ function runManagedImageRequest(config: AiConfig, attempt: (requestConfig: AiCon
             throw error;
         } finally {
             useImageTaskStore.getState().clearStatusText();
-            if (useAuthStore.getState().accessToken) void useAuthStore.getState().fetchProfile();
         }
     };
     const task = previous.then(run, run);
@@ -925,6 +924,14 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+    try {
+        return await requestGenerationInner(config, prompt, options);
+    } finally {
+        refreshYanluBalance();
+    }
+}
+
+async function requestGenerationInner(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const script = resolveModelScript(config, config.model || config.imageModel);
@@ -997,6 +1004,14 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
+    try {
+        return await requestEditInner(config, prompt, references, mask, options);
+    } finally {
+        refreshYanluBalance();
+    }
+}
+
+async function requestEditInner(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
@@ -1110,7 +1125,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
     } finally {
-        if (useAuthStore.getState().accessToken) void useAuthStore.getState().fetchProfile();
+        refreshYanluBalance();
     }
 }
 

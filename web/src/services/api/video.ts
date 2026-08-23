@@ -6,6 +6,7 @@ import { humanizeGenerationError } from "@/lib/generation-errors";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
+import { refreshYanluBalance } from "@/stores/use-auth-store";
 import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
 import type { ReferenceImage } from "@/types/image";
@@ -35,29 +36,49 @@ function aiHeaders(config: AiConfig, contentType?: string) {
 }
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
-    const task = await createVideoGenerationTask(config, prompt, references, options);
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-        if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-        const state = await pollVideoGenerationTask(config, task, options);
-        if (state.status === "completed") return state.result;
-        if (state.status === "failed") throw new Error(state.error);
-        if (attempt === 119) throw new Error(apiText("videoTimeout", { provider: "" }));
-        await delay(2500, options?.signal);
+    try {
+        const task = await createVideoGenerationTask(config, prompt, references, options);
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+            if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+            const state = await pollVideoGenerationTask(config, task, options);
+            if (state.status === "completed") return state.result;
+            if (state.status === "failed") throw new Error(state.error);
+            if (attempt === 119) throw new Error(apiText("videoTimeout", { provider: "" }));
+            await delay(2500, options?.signal);
+        }
+        throw new Error(apiText("videoTimeout", { provider: "" }));
+    } finally {
+        refreshYanluBalance();
     }
-    throw new Error(apiText("videoTimeout", { provider: "" }));
 }
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: RequestOptions): Promise<VideoGenerationTask> {
-    const selectedModel = (config.model || config.videoModel).trim();
-    const requestConfig = resolveModelRequestConfig(config, selectedModel);
-    const script = resolveModelScript(config, selectedModel);
-    if (script) return createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, options);
-    assertVideoConfig(requestConfig, requestConfig.model);
-    if (isGrokImagineVideo(requestConfig.model)) return createGrokVideoTask(requestConfig, selectedModel, prompt, references, options);
-    return createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
+    try {
+        const selectedModel = (config.model || config.videoModel).trim();
+        const requestConfig = resolveModelRequestConfig(config, selectedModel);
+        const script = resolveModelScript(config, selectedModel);
+        if (script) return await createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, options);
+        assertVideoConfig(requestConfig, requestConfig.model);
+        if (isGrokImagineVideo(requestConfig.model)) return await createGrokVideoTask(requestConfig, selectedModel, prompt, references, options);
+        return await createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
+    } catch (error) {
+        refreshYanluBalance();
+        throw error;
+    }
 }
 
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    try {
+        const state = await pollVideoGenerationTaskInner(config, task, options);
+        if (state.status === "completed" || state.status === "failed") refreshYanluBalance();
+        return state;
+    } catch (error) {
+        refreshYanluBalance();
+        throw error;
+    }
+}
+
+async function pollVideoGenerationTaskInner(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     if (task.provider === "plugin") {
         const result = pluginVideoResults.get(task.id);
         return result ? { status: "completed", result } : { status: "failed", error: apiText("pluginVideoExpired") };
