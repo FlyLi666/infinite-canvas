@@ -9,9 +9,11 @@ The current release needs manual verification in these areas:
 
 - Grok video params: on canvas and the video workbench, Grok should show 480p / 720p / **1080p** pills only (no custom numeric input, no 360p). Duration options are 6 / 10 / 15 (or 1–15), not 16 / 20. Requests must send `resolution`, `aspect_ratio` (`16:9` etc., never pixel `size`), and `generate_audio`. Turning off “Generate audio” should produce a silent clip. Choosing 720p / 1080p bills at **$0.14 / $0.25 per second** (previously every request was actually 480p). A 1080p delivery around 1920×1088 is expected 16-alignment.
 
-- Grok images: requests must not send `quality`; `n` is capped at 10. GPT Image 2 quality and count stay unchanged.
+- Grok images: requests must not send `quality`; `n` is capped at 10. GPT Image 2 still shows quality and count controls.
 
-- Model display names: after sign-in, the image picker should show “GPT-image-2 (Create/Edit) / GROK Fast (No Editing) / GROK High Quality (No Editing) / GROK Edit Only (Yanlu AI)” with a one-line hint; video should show “Grok Video 1.5”; text should show Sol / Luna / Terra. Stored values and requests must still use technical ids. Switching to 简体中文 should show the Chinese product labels. Selecting any Grok image/edit model must hide `16:9(4k)` / `9:16(4k)`; switching to Grok with a 4K size selected should fall back to the matching 2K size. GPT-image-2 still shows 4K.
+- GPT image generation now bills a single 1K tier at $1 per image; aspect-ratio choices actually apply. Selecting `gpt-image-2` must hide every `(2k)` / `(4k)` size and keep only base ratios (1:1, 3:2, 2:3, 4:3, 3:4, 16:9, 9:16, auto). Switching to GPT with a 2K/4K size selected should fall back to the matching base ratio. Transparent background and other options stay.
+
+- Model display names: after sign-in, the image picker should show “GPT-image-2 (Create/Edit) / GROK Fast (No Editing) / GROK High Quality (No Editing) / GROK Edit Only (Yanlu AI)” with a one-line hint; video should show “Grok Video 1.5”; text should show Sol / Luna / Terra. Stored values and requests must still use technical ids. Switching to 简体中文 should show the Chinese product labels. Selecting any Grok image/edit model must hide `16:9(4k)` / `9:16(4k)`; switching to Grok with a 4K size selected should fall back to the matching 2K size.
 
 - Top-bar version: the homepage and canvas chrome should no longer show a version number or open the release-notes modal, and the page should not fetch the upstream VERSION / CHANGELOG.
 

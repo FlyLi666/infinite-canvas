@@ -88,6 +88,18 @@ const GROK_SIZE_FALLBACK: Record<string, string> = {
     "3840x2160": "2048x1152",
     "2160x3840": "1152x2048",
 };
+const GPT_SIZE_FALLBACK: Record<string, string> = {
+    "1:1-2k": "1:1",
+    "16:9-2k": "16:9",
+    "9:16-2k": "9:16",
+    "16:9-4k": "16:9",
+    "9:16-4k": "9:16",
+    "2048x2048": "1:1",
+    "2048x1152": "16:9",
+    "1152x2048": "9:16",
+    "3840x2160": "16:9",
+    "2160x3840": "9:16",
+};
 
 export function isGrokImagineImageModel(value: string) {
     return GROK_IMAGE_MODELS.has(modelOptionName(value));
@@ -97,13 +109,26 @@ export function isGrokImagineVideoModel(value: string) {
     return modelOptionName(value).toLowerCase().includes("grok-imagine-video");
 }
 
+export function isGptImage2Model(value: string) {
+    return modelOptionName(value) === "gpt-image-2";
+}
+
 export function fallbackGrokImageSize(size: string) {
     return GROK_SIZE_FALLBACK[size] || size;
 }
 
+export function fallbackGptImageSize(size: string) {
+    return GPT_SIZE_FALLBACK[size] || size;
+}
+
+export function fallbackImageSizeForModel(model: string, size: string) {
+    if (isGrokImagineImageModel(model)) return fallbackGrokImageSize(size);
+    if (isGptImage2Model(model)) return fallbackGptImageSize(size);
+    return size;
+}
+
 export function grokImageModelPatch(model: string, size?: string) {
-    if (!isGrokImagineImageModel(model)) return { model };
-    const nextSize = fallbackGrokImageSize(size || "");
+    const nextSize = fallbackImageSizeForModel(model, size || "");
     return nextSize === (size || "") ? { model } : { model, size: nextSize };
 }
 
@@ -252,8 +277,8 @@ export const useConfigStore = create<ConfigStore>()(
             updateConfig: (key, value) =>
                 set((state) => {
                     const config = { ...state.config, [key]: value };
-                    if ((key === "imageModel" || key === "model") && isGrokImagineImageModel(String(value))) {
-                        config.size = fallbackGrokImageSize(config.size);
+                    if (key === "imageModel" || key === "model") {
+                        config.size = fallbackImageSizeForModel(String(value), config.size);
                     }
                     return { config };
                 }),

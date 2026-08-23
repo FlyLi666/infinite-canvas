@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { fallbackGrokImageSize, isGrokImagineImageModel, type AiConfig } from "@/stores/use-config-store";
+import { fallbackGptImageSize, fallbackGrokImageSize, isGptImage2Model, isGrokImagineImageModel, type AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
     { value: "auto", labelKey: "auto" },
@@ -47,20 +47,23 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const { t } = useTranslation();
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const grokImage = isGrokImagineImageModel(config.model || config.imageModel);
+    const gptImage = isGptImage2Model(config.model || config.imageModel);
     const countCap = grokImage ? Math.min(maxCount, 10) : maxCount;
     const quality = config.quality || "auto";
     const count = Math.max(1, Math.min(countCap, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
-    const hideGrok4k = grokImage;
-    const visibleAspects = hideGrok4k ? aspectOptions.filter((item) => !item.value.endsWith("-4k")) : aspectOptions;
+    const visibleAspects = gptImage
+        ? aspectOptions.filter((item) => !item.value.endsWith("-2k") && !item.value.endsWith("-4k"))
+        : grokImage
+            ? aspectOptions.filter((item) => !item.value.endsWith("-4k"))
+            : aspectOptions;
     const transparentBackground = config.background === "transparent";
     const selectedAspect = visibleAspects.find((item) => (item.size || item.value) === activeSize || item.value === activeSize) || visibleAspects[0];
 
     useEffect(() => {
-        if (!hideGrok4k) return;
-        const next = fallbackGrokImageSize(activeSize);
+        const next = gptImage ? fallbackGptImageSize(activeSize) : grokImage ? fallbackGrokImageSize(activeSize) : activeSize;
         if (next !== activeSize) onConfigChange("size", next);
-    }, [activeSize, hideGrok4k, onConfigChange]);
+    }, [activeSize, gptImage, grokImage, onConfigChange]);
     useEffect(() => {
         if (!grokImage) return;
         const next = Math.max(1, Math.min(countCap, Math.floor(Math.abs(Number(config.count)) || 1)));
