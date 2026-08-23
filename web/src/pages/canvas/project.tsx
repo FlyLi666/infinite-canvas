@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import { humanizeGenerationError } from "@/lib/generation-errors";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
-import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { resolveModelForCapability, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { uploadImage } from "@/services/image-storage";
 import { uploadMediaFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -491,7 +491,7 @@ function InfiniteCanvasPage() {
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video, pending: PendingConnectionCreate) => {
-            const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
+            const metadata = type === CanvasNodeType.Config ? { model: resolveModelForCapability(effectiveConfig, undefined, "image"), size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
             if (!connection) {
@@ -655,7 +655,7 @@ function InfiniteCanvasPage() {
             const configMetadata =
                 type === CanvasNodeType.Config
                     ? {
-                          model: effectiveConfig.imageModel || effectiveConfig.model,
+                          model: resolveModelForCapability(effectiveConfig, undefined, "image"),
                           size: effectiveConfig.size,
                           count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                       }
@@ -1588,7 +1588,7 @@ function InfiniteCanvasPage() {
                     { x: textNode.position.x + textNode.width + gap + configSpec.width / 2, y: centerY },
                     {
                         generationMode: "text",
-                        model: effectiveConfig.textModel || effectiveConfig.model,
+                        model: resolveModelForCapability(effectiveConfig, undefined, "text"),
                         count: 1,
                         composerContent: t("canvas.reverseComposer", { imageId: node.id, textId: textNode.id }),
                     },
@@ -2535,7 +2535,7 @@ function InfiniteCanvasPage() {
                 },
                 {
                     prompt: "",
-                    model: effectiveConfig.imageModel || effectiveConfig.model,
+                    model: resolveModelForCapability(effectiveConfig, undefined, "image"),
                     size: effectiveConfig.size,
                     count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                 },

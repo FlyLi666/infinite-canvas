@@ -1,6 +1,6 @@
 import { getNodeSpec, NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
-import { resolveModelForCapability, useConfigStore, type AiConfig } from "@/stores/use-config-store";
+import type { AiConfig } from "@/stores/use-config-store";
 import type { UploadedImage } from "@/services/image-storage";
 import type { UploadedFile } from "@/services/file-storage";
 import type { ReferenceImage } from "@/types/image";
@@ -9,12 +9,6 @@ import { CanvasNodeType, type CanvasImageGenerationType, type CanvasNodeData, ty
 export function createCanvasNode(type: CanvasNodeTypeId, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
     const spec = getNodeSpec(type);
     const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const nextMetadata = { ...spec.metadata, ...metadata };
-    if (type === CanvasNodeType.Config) {
-        const mode = nextMetadata.generationMode === "text" || nextMetadata.generationMode === "video" ? nextMetadata.generationMode : "image";
-        nextMetadata.model = resolveModelForCapability(useConfigStore.getState().config, nextMetadata.model, mode);
-    }
-
     return {
         id,
         type,
@@ -25,7 +19,7 @@ export function createCanvasNode(type: CanvasNodeTypeId, position: Position, met
         },
         width: spec.width,
         height: spec.height,
-        metadata: nextMetadata,
+        metadata: { ...spec.metadata, ...metadata },
     };
 }
 

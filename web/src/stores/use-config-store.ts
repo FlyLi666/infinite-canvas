@@ -165,18 +165,13 @@ export function modelMatchesCapability(config: AiConfig, value: string, capabili
 }
 
 export function resolveModelForCapability(config: AiConfig, currentModel: string | undefined, capability: ModelCapability) {
-    const live = getLiveAiConfig(config);
-    const hasYanlu = live.channels.some((channel) => channel.id === YANLU_CHANNEL_ID);
-    const usable = (value?: string) => Boolean(value) && !(hasYanlu && !isYanluModelValue(value)) && modelMatchesCapability(live, value!, capability);
+    const hasYanlu = config.channels.some((channel) => channel.id === YANLU_CHANNEL_ID);
+    const usable = (value?: string) => Boolean(value) && !(hasYanlu && !isYanluModelValue(value)) && modelMatchesCapability(config, value!, capability);
     if (usable(currentModel)) return currentModel!;
-    const preferred = capability === "image" ? live.imageModel : capability === "video" ? live.videoModel : live.textModel;
+    const preferred = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : config.textModel;
     if (usable(preferred)) return preferred;
     if (hasYanlu) return yanluManagedModel(capability);
     return capability === "image" ? defaultConfig.imageModel : capability === "video" ? defaultConfig.videoModel : defaultConfig.textModel;
-}
-
-function getLiveAiConfig(config: AiConfig) {
-    return useConfigStore.getState().config || config;
 }
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
