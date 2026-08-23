@@ -7,6 +7,8 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- Compose prompt: with compose enabled, connecting upstream text/images without writing `@` must send all connected resources (the output should reflect the upstream brief), and the badge counts must match what is actually sent. Writing `@[node:…]` still sends only the referenced items; unmentioned upstream resources stay out of the request and the badge.
+
 - Capability matrix / transparent background: Grok image, high-quality image, and edit must **hide** the transparent-background switch; GPT-image-2 still shows it. All other parameter behavior stays as in v0.17.4: GPT keeps base ratios only, Grok image hides 4K, Grok video keeps the three resolutions and 1–15s, Grok images omit `quality` and cap `n` at 10.
 
 - Grok video params: on canvas and the video workbench, Grok should show 480p / 720p / **1080p** pills only (no custom numeric input, no 360p). Duration options are 6 / 10 / 15 (or 1–15), not 16 / 20. Requests must send `resolution`, `aspect_ratio` (`16:9` etc., never pixel `size`), and `generate_audio`. Turning off “Generate audio” should produce a silent clip. Choosing 720p / 1080p bills at **$0.14 / $0.25 per second** (previously every request was actually 480p). A 1080p delivery around 1920×1088 is expected 16-alignment.

@@ -34,6 +34,10 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
         return buildComposerGenerationContext(inputs, prompt);
     }
 
+    return buildConnectedGenerationContext(inputs, prompt);
+}
+
+function buildConnectedGenerationContext(inputs: NodeGenerationInput[], prompt: string): NodeGenerationContext {
     const upstreamText = inputs
         .map((input) => input.text)
         .filter(Boolean)
@@ -88,18 +92,7 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
     const referenceVideos = selectedInputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = selectedInputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
 
-    if (!hasToken) {
-        return {
-            prompt,
-            referenceImages: [],
-            referenceVideos: [],
-            referenceAudios: [],
-            textCount: 0,
-            imageCount: 0,
-            videoCount: 0,
-            audioCount: 0,
-        };
-    }
+    if (!hasToken) return buildConnectedGenerationContext(inputs, prompt);
 
     return {
         prompt: nextPrompt,
@@ -110,6 +103,19 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
         imageCount: referenceImages.length,
         videoCount: referenceVideos.length,
         audioCount: referenceAudios.length,
+    };
+}
+
+export function getNodeGenerationInputSummary(node: CanvasNodeData | undefined, inputs: NodeGenerationInput[], prompt: string) {
+    const context =
+        node?.type === CanvasNodeType.Config && Boolean(node.metadata?.composerContent?.trim())
+            ? buildComposerGenerationContext(inputs, prompt)
+            : buildConnectedGenerationContext(inputs, prompt);
+    return {
+        textCount: context.textCount,
+        imageCount: context.imageCount,
+        videoCount: context.videoCount,
+        audioCount: context.audioCount,
     };
 }
 
