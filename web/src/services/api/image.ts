@@ -1,7 +1,10 @@
 import axios from "axios";
 
 import i18n from "@/i18n";
-import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { isYanluImageApiBaseUrl } from "@/lib/yanlu-endpoints";
+import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, useConfigStore, YANLU_CHANNEL_ID, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { useAuthStore } from "@/stores/use-auth-store";
+import { useImageTaskStore } from "@/stores/use-image-task-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -71,8 +74,14 @@ type ResponseApiPayload = {
 type ResponseStreamState = { buffer: string; text: string; payload?: ResponseApiPayload; error?: string };
 
 type ImageApiResponse = {
+    id?: string;
+    status?: string;
+    position?: number;
+    url?: string;
+    b64_json?: string;
     data?: Array<Record<string, unknown>>;
-    error?: { message?: string };
+    error?: { message?: string } | string;
+    message?: string;
     code?: number;
     msg?: string;
 };
@@ -94,7 +103,39 @@ type GeminiPayload = {
     promptFeedback?: { blockReason?: string };
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
-type RequestOptions = { signal?: AbortSignal };
+
+export type ImageTaskUpdate = { status: "queued" | "pending" | "retryWait"; position?: number; retryInSeconds?: number };
+type RequestOptions = { signal?: AbortSignal; onTaskUpdate?: (update: ImageTaskUpdate) => void };
+
+/** 生图失败错误，code 保留服务端错误类型（如 insufficient_balance），供 UI 做去充值等定向处理。 */
+export class ImageGenerationError extends Error {
+    code?: string;
+
+    constructor(message: string, code?: string) {
+        super(message);
+        this.name = "ImageGenerationError";
+        this.code = code;
+    }
+}
+
+export function describeImageTaskUpdate(update: ImageTaskUpdate) {
+    if (update.status === "queued") {
+        if (typeof update.position === "number" && update.position > 1) {
+            return i18n.t("generation.queuedAhead", { count: update.position - 1 });
+        }
+        if (typeof update.position === "number" && update.position === 1) {
+            return i18n.t("generation.queuedNext");
+        }
+        return i18n.t("generation.queuedWaiting");
+    }
+    if (update.status === "retryWait") return i18n.t("generation.retryWait", { seconds: update.retryInSeconds });
+    return i18n.t("generation.pendingEta");
+}
+
+function notifyTaskUpdate(update: ImageTaskUpdate, options?: RequestOptions) {
+    options?.onTaskUpdate?.(update);
+    useImageTaskStore.getState().setStatusText(describeImageTaskUpdate(update));
+}
 
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
@@ -267,6 +308,174 @@ function parseImagePayload(payload: ImageApiResponse) {
     }
 
     return images;
+}
+
+const IMAGE_TASK_WAIT = new Set(["", "pending", "queued", "processing", "in_progress", "running"]);
+
+function extractImageTaskId(payload: ImageApiResponse | undefined) {
+    const id = payload?.id?.trim() || "";
+    return id;
+}
+
+function isAsyncImageTask(status: number, payload: ImageApiResponse | undefined) {
+    const taskId = extractImageTaskId(payload);
+    if (!taskId || payload?.data?.length || payload?.url || payload?.b64_json) return false;
+    const taskStatus = String(payload?.status || "").toLowerCase();
+    return status === 202 || IMAGE_TASK_WAIT.has(taskStatus);
+}
+
+function delay(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+        }
+        const timer = window.setTimeout(resolve, ms);
+        signal?.addEventListener("abort", () => {
+            window.clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+    });
+}
+
+const IMAGE_TASK_ERROR_KEYS: Record<string, string> = {
+    insufficient_balance: "insufficientBalance",
+    invalid_api_key: "invalidApiKeyRelogin",
+    generation_failed: "imageGenerationFailed",
+    too_many_requests: "tooBusyRetryLater",
+};
+const IMAGE_TASK_STAGE_TIMEOUT = 180_000;
+const SUBMIT_BUSY_RETRY_LIMIT = 3;
+
+function readImageTaskErrorCode(payload: ImageApiResponse) {
+    const raw = typeof payload.error === "string" ? payload.error : payload.error?.message || "";
+    const code = String(raw).trim().toLowerCase();
+    return IMAGE_TASK_ERROR_KEYS[code] ? code : "";
+}
+
+function imageTaskFailure(payload: ImageApiResponse) {
+    const code = readImageTaskErrorCode(payload);
+    const detail = usefulImageTaskMessage(payload);
+    // 余额/密钥给定向文案；其余失败优先展示上游原因，不要盖成「请简化描述」。
+    if (code === "insufficient_balance" || code === "invalid_api_key") {
+        return new ImageGenerationError(apiText(IMAGE_TASK_ERROR_KEYS[code]), code);
+    }
+    if (detail) return new ImageGenerationError(detail, code || "generation_failed");
+    if (code) return new ImageGenerationError(apiText(IMAGE_TASK_ERROR_KEYS[code]), code);
+    return new ImageGenerationError(apiText("imageGenerationFailed"), "generation_failed");
+}
+
+function usefulImageTaskMessage(payload: ImageApiResponse) {
+    const raw = readApiErrorMessage(payload).trim();
+    if (!raw || IMAGE_TASK_ERROR_KEYS[raw.toLowerCase()]) return "";
+    return raw;
+}
+
+async function pollImageTask(config: AiConfig, taskId: string, options?: RequestOptions) {
+    // 排队中的任务随队列推进不断续期；进入生成阶段后按单段超时兜底。
+    let deadline = Date.now() + IMAGE_TASK_STAGE_TIMEOUT;
+    while (Date.now() < deadline) {
+        await delay(2000, options?.signal);
+        const response = await axios.get<ImageApiResponse>(aiApiUrl(config, `/images/tasks/${encodeURIComponent(taskId)}`), {
+            headers: aiHeaders(config),
+            signal: options?.signal,
+        });
+        const payload = response.data || {};
+        const status = String(payload.status || "").toLowerCase();
+        if (status === "failed") {
+            throw imageTaskFailure(payload);
+        }
+        if (typeof payload.url === "string" && payload.url) {
+            return [{ id: nanoid(), dataUrl: payload.url }];
+        }
+        if (typeof payload.b64_json === "string" && payload.b64_json) {
+            return [{ id: nanoid(), dataUrl: `data:image/png;base64,${payload.b64_json}` }];
+        }
+        if (payload.data?.length) {
+            return parseImagePayload(payload);
+        }
+        if (status === "succeeded") {
+            throw new Error(apiText("noImageReturned"));
+        }
+        if (status === "queued") {
+            deadline = Date.now() + IMAGE_TASK_STAGE_TIMEOUT;
+            notifyTaskUpdate({ status: "queued", position: typeof payload.position === "number" ? payload.position : undefined }, options);
+        } else {
+            notifyTaskUpdate({ status: "pending" }, options);
+        }
+    }
+    throw new Error(apiText("requestFailed"));
+}
+
+function notifyImageTaskAccepted(payload: ImageApiResponse | undefined, options?: RequestOptions) {
+    if (String(payload?.status || "").toLowerCase() === "queued") {
+        notifyTaskUpdate({ status: "queued", position: typeof payload?.position === "number" ? payload.position : undefined }, options);
+    } else {
+        notifyTaskUpdate({ status: "pending" }, options);
+    }
+}
+
+/** 提交阶段遇到 429（同 Key 已有任务在跑）时按 Retry-After 自动重试，并向 UI 播报等待秒数。 */
+async function submitWithBusyRetry<T>(submit: () => Promise<T>, options?: RequestOptions): Promise<T> {
+    for (let attempt = 0; ; attempt += 1) {
+        try {
+            return await submit();
+        } catch (error) {
+            if (!axios.isAxiosError(error) || error.response?.status !== 429 || attempt >= SUBMIT_BUSY_RETRY_LIMIT) throw error;
+            const retryAfter = Number(error.response.headers?.["retry-after"]);
+            const seconds = Math.min(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : 5, 60);
+            notifyTaskUpdate({ status: "retryWait", retryInSeconds: seconds }, options);
+            await delay(seconds * 1000, options?.signal);
+        }
+    }
+}
+
+const imageTaskQueues = new Map<string, Promise<unknown>>();
+
+/**
+ * 研路AI异步生图服务同一 Key 只允许一个进行中任务，这里按 Key 把「提交 + 轮询」整体串行；
+ * 其他渠道（如本地 CPA 同步接口）不受影响。同时负责 invalid_api_key 时静默重开通一次密钥、
+ * 任务结束后刷新余额、清理全局任务状态文本。
+ */
+function runManagedImageRequest(config: AiConfig, attempt: (requestConfig: AiConfig) => Promise<Array<{ id: string; dataUrl: string }>>, options?: RequestOptions) {
+    if (!isYanluImageApiBaseUrl(config.baseUrl)) return attempt(config);
+    const previous = imageTaskQueues.get(config.apiKey) || Promise.resolve();
+    const run = async () => {
+        try {
+            return await attempt(config);
+        } catch (error) {
+            const auth = useAuthStore.getState();
+            if (error instanceof ImageGenerationError && error.code === "invalid_api_key" && auth.accessToken) {
+                // 密钥可能被删除或失效：重新开通一次「画布」密钥后重试；仍失败则提示重新登录。
+                const freshKey = await auth
+                    .provision()
+                    .then(() => useConfigStore.getState().config.channels.find((channel) => channel.id === YANLU_CHANNEL_ID)?.apiKey || "")
+                    .catch(() => "");
+                if (freshKey && freshKey !== config.apiKey) {
+                    return await attempt({ ...config, apiKey: freshKey });
+                }
+            }
+            if (error instanceof ImageGenerationError && error.code === "invalid_api_key") useAuthStore.getState().openLogin();
+            throw error;
+        } finally {
+            useImageTaskStore.getState().clearStatusText();
+            if (useAuthStore.getState().accessToken) void useAuthStore.getState().fetchProfile();
+        }
+    };
+    const task = previous.then(run, run);
+    imageTaskQueues.set(
+        config.apiKey,
+        task.then(
+            () => undefined,
+            () => undefined,
+        ),
+    );
+    return task;
+}
+
+function asImageGenerationError(error: unknown, fallback: string) {
+    if (error instanceof ImageGenerationError) return error;
+    return new ImageGenerationError(readAxiosError(error, fallback));
 }
 
 function readApiErrorMessage(value: unknown): string {
@@ -748,27 +957,41 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const requestSize = resolveRequestSize(quality, config.size);
     const background = normalizeBackground(config.background);
     try {
-        const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(requestConfig, "/images/generations"),
-            {
-                model: requestConfig.model,
-                prompt: withSystemPrompt(requestConfig, prompt),
-                n,
-                ...(quality ? { quality } : {}),
-                ...(requestSize ? { size: requestSize } : {}),
-                ...(background ? { background } : {}),
-                response_format: "b64_json",
-                output_format: IMAGE_OUTPUT_FORMAT,
+        return await runManagedImageRequest(
+            requestConfig,
+            async (activeConfig) => {
+                const response = await submitWithBusyRetry(
+                    () =>
+                        axios.post<ImageApiResponse>(
+                            aiApiUrl(activeConfig, "/images/generations"),
+                            {
+                                model: activeConfig.model,
+                                prompt: withSystemPrompt(activeConfig, prompt),
+                                n,
+                                ...(quality ? { quality } : {}),
+                                ...(requestSize ? { size: requestSize } : {}),
+                                ...(background ? { background } : {}),
+                                response_format: "b64_json",
+                                output_format: IMAGE_OUTPUT_FORMAT,
+                            },
+                            {
+                                headers: aiHeaders(activeConfig, "application/json"),
+                                signal: options?.signal,
+                                validateStatus: (status) => status >= 200 && status < 300,
+                            },
+                        ),
+                    options,
+                );
+                if (isAsyncImageTask(response.status, response.data)) {
+                    notifyImageTaskAccepted(response.data, options);
+                    return pollImageTask(activeConfig, extractImageTaskId(response.data), options);
+                }
+                return parseImagePayload(response.data);
             },
-            {
-                headers: aiHeaders(requestConfig, "application/json"),
-                signal: options?.signal,
-            },
+            options,
         );
-        const images = parseImagePayload(response.data);
-        return images;
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("requestFailed")));
+        throw asImageGenerationError(error, apiText("requestFailed"));
     }
 }
 
@@ -829,19 +1052,36 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
-        const images = parseImagePayload(response.data);
-        return images;
+        return await runManagedImageRequest(
+            requestConfig,
+            async (activeConfig) => {
+                const response = await submitWithBusyRetry(
+                    () =>
+                        axios.post<ImageApiResponse>(aiApiUrl(activeConfig, "/images/edits"), formData, {
+                            headers: aiHeaders(activeConfig),
+                            signal: options?.signal,
+                            validateStatus: (status) => status >= 200 && status < 300,
+                        }),
+                    options,
+                );
+                if (isAsyncImageTask(response.status, response.data)) {
+                    notifyImageTaskAccepted(response.data, options);
+                    return pollImageTask(activeConfig, extractImageTaskId(response.data), options);
+                }
+                return parseImagePayload(response.data);
+            },
+            options,
+        );
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("requestFailed")));
+        throw asImageGenerationError(error, apiText("requestFailed"));
     }
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
     const script = resolveModelScript(config, config.model || config.textModel);
-    if (script) {
-        try {
+    try {
+        if (script) {
             const answer = await runModelPlugin<string>({
                 capability: "text",
                 script,
@@ -853,11 +1093,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
             const text = String(answer ?? "").trim() || apiText("noContent");
             if (text === apiText("noContent")) onDelta(text);
             return text;
-        } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
-    }
-    try {
         if (requestConfig.apiFormat === "gemini") {
             const answer = (await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages), onDelta, options)).content || apiText("noContent");
             if (answer === apiText("noContent")) onDelta(answer);
@@ -872,6 +1108,8 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
         return answer;
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
+    } finally {
+        if (useAuthStore.getState().accessToken) void useAuthStore.getState().fetchProfile();
     }
 }
 

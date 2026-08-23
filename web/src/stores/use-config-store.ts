@@ -4,9 +4,11 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
+import { isYanluSameOriginProxyHost, YANLU_CN_API_BASE_URL, YANLU_IMG_API_BASE_URL } from "@/lib/yanlu-endpoints";
+import { useAuthStore } from "@/stores/use-auth-store";
 
 export type ApiCallFormat = "openai" | "gemini";
-export type ModelCapability = "image" | "video" | "text" | "audio";
+export type ModelCapability = "image" | "video" | "text";
 export type ReasoningEffort = "auto" | "low" | "medium" | "high" | "xhigh";
 
 export type ChannelModel = {
@@ -20,6 +22,8 @@ export type ModelChannel = {
     name: string;
     baseUrl: string;
     apiKey: string;
+    /** 研路AI 文本走 Codex 分组的独立 Key；生图/视频仍用 apiKey。 */
+    textApiKey?: string;
     apiFormat: ApiCallFormat;
     models: ChannelModel[];
 };
@@ -34,11 +38,6 @@ export type AiConfig = {
     imageModel: string;
     videoModel: string;
     textModel: string;
-    audioModel: string;
-    audioVoice: string;
-    audioFormat: string;
-    audioSpeed: string;
-    audioInstructions: string;
     videoSeconds: string;
     vquality: string;
     videoGenerateAudio: string;
@@ -81,28 +80,22 @@ export const defaultConfig: AiConfig = {
             apiFormat: "openai",
             models: [
                 { name: "gpt-image-2", capability: "image" },
-                { name: "grok-imagine-video", capability: "video" },
+                { name: "grok-imagine-video-1.5", capability: "video" },
                 { name: "gpt-5.5", capability: "text" },
-                { name: "gpt-4o-mini-tts", capability: "audio" },
             ],
         },
     ],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video",
+    videoModel: "default::grok-imagine-video-1.5",
     textModel: "default::gpt-5.5",
-    audioModel: "default::gpt-4o-mini-tts",
-    audioVoice: "alloy",
-    audioFormat: "mp3",
-    audioSpeed: "1",
-    audioInstructions: "",
     videoSeconds: "6",
     vquality: "720",
     videoGenerateAudio: "true",
     videoWatermark: "false",
     systemPrompt: "",
     reasoningEffort: "auto",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
+    models: ["default::gpt-image-2", "default::grok-imagine-video-1.5", "default::gpt-5.5"],
     quality: "auto",
     size: "1:1",
     background: "",
@@ -137,16 +130,21 @@ const VIDEO_KEYWORDS = ["video", "sora", "veo", "kling", "wan", "hailuo"];
 export function boolConfig(value: string, fallback: boolean) {
     return value ? value === "true" : fallback;
 }
-const AUDIO_KEYWORDS = ["audio", "tts", "speech", "voice", "music", "sound"];
-const IMAGE_KEYWORDS = ["seedream", "gpt-image", "image", "dall-e", "dalle", "imagen", "flux", "sdxl", "stable-diffusion", "midjourney"];
+const IMAGE_KEYWORDS = ["seedream", "gpt-image", "grok-imagine", "image", "dall-e", "dalle", "imagen", "flux", "sdxl", "stable-diffusion", "midjourney"];
+const TTS_KEYWORDS = ["tts", "speech", "whisper", "gpt-4o-mini-tts"];
 
 /** Best-effort default capability for a freshly fetched model name; user can override in the channel editor. */
 export function guessCapability(name: string): ModelCapability {
     const value = name.toLowerCase();
     if (VIDEO_KEYWORDS.some((keyword) => value.includes(keyword))) return "video";
-    if (AUDIO_KEYWORDS.some((keyword) => value.includes(keyword))) return "audio";
     if (IMAGE_KEYWORDS.some((keyword) => value.includes(keyword))) return "image";
     return "text";
+}
+
+function isRemovedTtsModel(name: string, capability?: string) {
+    if (capability === "audio") return true;
+    const value = name.toLowerCase();
+    return TTS_KEYWORDS.some((keyword) => value.includes(keyword));
 }
 
 function findChannelModel(config: AiConfig, value: string): { channel: ModelChannel; model: ChannelModel } | null {
@@ -167,8 +165,8 @@ export function modelMatchesCapability(config: AiConfig, value: string, capabili
 }
 
 export function resolveModelForCapability(config: AiConfig, currentModel: string | undefined, capability: ModelCapability) {
-    const defaultModel = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : capability === "audio" ? config.audioModel : config.textModel;
-    const fallbackModel = capability === "image" ? defaultConfig.imageModel : capability === "video" ? defaultConfig.videoModel : capability === "audio" ? defaultConfig.audioModel : defaultConfig.textModel;
+    const defaultModel = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : config.textModel;
+    const fallbackModel = capability === "image" ? defaultConfig.imageModel : capability === "video" ? defaultConfig.videoModel : defaultConfig.textModel;
     if (currentModel && modelMatchesCapability(config, currentModel, capability)) return currentModel;
     if (defaultModel && modelMatchesCapability(config, defaultModel, capability)) return defaultModel;
     return fallbackModel;
@@ -185,8 +183,8 @@ export function resolveModelScript(config: AiConfig, value: string) {
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
-    const channel = resolveModelChannel(config, model);
-    return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
+    const request = resolveModelRequestConfig(config, model);
+    return Boolean(model.trim() && request.baseUrl.trim() && request.apiKey.trim());
 }
 
 export const useConfigStore = create<ConfigStore>()(
@@ -211,8 +209,22 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
-            isAiConfigReady: (config, model) => isAiConfigReady(config, model),
-            openConfigDialog: (shouldPromptContinue = false, configTab = "channels") => set({ isConfigOpen: true, shouldPromptContinue, configTab }),
+            // 产品规则：所有生成/编辑动作必须先登录研路AI账号，未登录一律视为未就绪（即使本地渠道可用），
+            // 各生成入口随后调用 openConfigDialog(true)，由下方拦截统一弹登录框；登录后才走真实配置检查。
+            isAiConfigReady: (config, model) => Boolean(useAuthStore.getState().accessToken) && isAiConfigReady(config, model),
+            openConfigDialog: (shouldPromptContinue = false, configTab = "channels") => {
+                // 登录墙：生成/编辑动作因配置未就绪走到这里（shouldPromptContinue=true）时，
+                // 未登录用户改为弹研路AI登录，登录后由托管渠道自动接管；已登录用户按原逻辑打开配置。
+                if (shouldPromptContinue) {
+                    const auth = useAuthStore.getState();
+                    if (!auth.accessToken) {
+                        auth.openLogin();
+                        return;
+                    }
+                    if (!get().config.channels.some((channel) => channel.id === YANLU_CHANNEL_ID)) void auth.provision().catch(() => undefined);
+                }
+                set({ isConfigOpen: true, shouldPromptContinue, configTab });
+            },
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
         }),
@@ -225,7 +237,7 @@ export const useConfigStore = create<ConfigStore>()(
                 const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
                 const config = { ...defaultConfig, ...persistedConfig };
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
-                const channels = normalizeChannels(config);
+                const channels = retainPublicChannels(normalizeChannels(config));
                 const models = modelOptionsFromChannels(channels);
                 return {
                     ...current,
@@ -239,11 +251,6 @@ export const useConfigStore = create<ConfigStore>()(
                         imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
                         videoModel: normalizeModelOptionValue(config.videoModel, channels),
                         textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
-                        audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
-                        audioVoice: config.audioVoice || defaultConfig.audioVoice,
-                        audioFormat: config.audioFormat || defaultConfig.audioFormat,
-                        audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
-                        audioInstructions: config.audioInstructions || "",
                         reasoningEffort: config.reasoningEffort || "auto",
                         videoSeconds: config.videoSeconds || "6",
                         vquality: config.vquality || "720",
@@ -268,7 +275,8 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
     const result: ChannelModel[] = [];
     for (const item of models || []) {
         const name = (typeof item === "string" ? item : item?.name || "").trim();
-        if (!name || seen.has(name)) continue;
+        const rawCapability = typeof item === "string" ? "" : String(item?.capability || "");
+        if (!name || seen.has(name) || isRemovedTtsModel(name, rawCapability)) continue;
         seen.add(name);
         const capability = typeof item === "string" ? guessCapability(name) : item.capability || guessCapability(name);
         const script = typeof item === "string" ? undefined : item.script?.trim() || undefined;
@@ -277,13 +285,16 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
     return result;
 }
 
-export function createModelChannel(channel?: Partial<ModelChannel>): ModelChannel {
+export type ModelChannelInput = Partial<Omit<ModelChannel, "models">> & { models?: Array<string | ChannelModel> };
+
+export function createModelChannel(channel?: ModelChannelInput): ModelChannel {
     const apiFormat = normalizeApiFormat(channel?.apiFormat);
     return {
         id: channel?.id?.trim() || nanoid(),
         name: channel?.name?.trim() || i18n.t("config.channels.newName"),
         baseUrl: channel?.baseUrl?.trim() || defaultBaseUrlForApiFormat(apiFormat),
         apiKey: channel?.apiKey || "",
+        ...(channel?.textApiKey?.trim() ? { textApiKey: channel.textApiKey.trim() } : {}),
         apiFormat,
         models: normalizeChannelModels(channel?.models),
     };
@@ -339,13 +350,27 @@ export function resolveModelChannel(config: AiConfig, value: string) {
 
 export function resolveModelRequestConfig(config: AiConfig, value: string) {
     const channel = resolveModelChannel(config, value);
+    const model = modelOptionName(value || config.model);
     return {
         ...config,
-        model: modelOptionName(value || config.model),
-        baseUrl: channel.baseUrl,
-        apiKey: channel.apiKey,
+        model,
+        baseUrl: resolveManagedModelBaseUrl(channel, model),
+        apiKey: resolveManagedModelApiKey(channel, model),
         apiFormat: channel.apiFormat,
     };
+}
+
+/** gpt-image 走异步生图服务；托管渠道里的 Grok Imagine 图/视频走对话入口。 */
+function resolveManagedModelBaseUrl(channel: ModelChannel, model: string) {
+    if (channel.id !== YANLU_CHANNEL_ID) return channel.baseUrl;
+    return model.startsWith("gpt-image-") ? YANLU_IMG_API_BASE_URL : YANLU_CN_API_BASE_URL;
+}
+
+/** 文本走 RIGEL-文本 Key；生图/Grok 走 RIGEL-图像 Key。两边都是当前登录用户自己的托管密钥。 */
+function resolveManagedModelApiKey(channel: ModelChannel, model: string) {
+    if (channel.id !== YANLU_CHANNEL_ID) return channel.apiKey;
+    if (model.startsWith("gpt-image-") || model.startsWith("grok-")) return channel.apiKey;
+    return channel.textApiKey?.trim() || "";
 }
 
 function normalizeChannels(config: AiConfig) {
@@ -366,7 +391,7 @@ function normalizeChannels(config: AiConfig) {
                 baseUrl: config.baseUrl || defaultConfig.baseUrl,
                 apiKey: config.apiKey || "",
                 apiFormat: config.apiFormat || defaultConfig.apiFormat,
-                models: normalizeChannelModels([config.model, config.imageModel, config.videoModel, config.textModel, config.audioModel].map(modelOptionName)),
+                models: normalizeChannelModels([config.model, config.imageModel, config.videoModel, config.textModel].map(modelOptionName)),
             }),
         );
     }
@@ -386,9 +411,166 @@ function uniqueModelOptions(models: string[]) {
     return Array.from(new Set((models || []).map((model) => model.trim()).filter(Boolean)));
 }
 
+const YANLU_SAME_ORIGIN_PROXY: Record<string, string> = {
+    "admin.flyli.cn": "/__rigel-ai/cpa",
+    "api.flyli.cn": "/__rigel-ai/cpa",
+    [new URL(YANLU_CN_API_BASE_URL).hostname]: "/__rigel-ai/chat",
+    [new URL(YANLU_IMG_API_BASE_URL).hostname]: "/__rigel-ai/image",
+};
+
+function proxyYanluBaseUrl(apiBaseUrl: string) {
+    // 只有本机 dev / preview 存在同源代理；生产构建直连线上域名。
+    if (typeof window === "undefined" || !isYanluSameOriginProxyHost()) return apiBaseUrl;
+    try {
+        const parsed = new URL(apiBaseUrl, window.location.origin);
+        const prefix = YANLU_SAME_ORIGIN_PROXY[parsed.hostname];
+        if (!prefix) return apiBaseUrl;
+        return `${window.location.origin}${prefix}${parsed.pathname}${parsed.search}`;
+    } catch {
+        return apiBaseUrl;
+    }
+}
+
 export function buildApiUrl(baseUrl: string, path: string) {
     const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
     const lowerBaseUrl = normalizedBaseUrl.toLowerCase();
     const apiBaseUrl = lowerBaseUrl.endsWith("/v1") ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`;
-    return `${apiBaseUrl}${path}`;
+    return `${proxyYanluBaseUrl(apiBaseUrl)}${path}`;
+}
+
+export const YANLU_CHANNEL_ID = "yanlu";
+export const YANLU_CHANNEL_NAME = "研路AI";
+
+/** 对外只保留研路AI托管渠道；未登录时只留默认占位，丢掉用户自己加过的渠道。 */
+export function retainPublicChannels(channels: ModelChannel[]): ModelChannel[] {
+    const managed = channels.find((channel) => channel.id === YANLU_CHANNEL_ID);
+    if (managed) return [managed];
+    return [createModelChannel(defaultConfig.channels[0])];
+}
+
+const YANLU_IMAGE_MODEL_NAME = "gpt-image-2";
+const YANLU_VIDEO_MODEL_NAME = "grok-imagine-video-1.5";
+const YANLU_TEXT_MODEL_NAME = "gpt-5.6-sol";
+const YANLU_MANAGED_MODELS: ChannelModel[] = [
+    { name: "gpt-image-2", capability: "image" },
+    { name: "grok-imagine-image", capability: "image" },
+    { name: "grok-imagine-edit", capability: "image" },
+    { name: "grok-imagine-video-1.5", capability: "video" },
+    { name: "gpt-5.6-sol", capability: "text" },
+    { name: "gpt-5.6-luna", capability: "text" },
+    { name: "gpt-5.6-terra", capability: "text" },
+];
+
+/**
+ * 登录后写入 / 覆盖研路AI托管渠道（id 固定 yanlu，同名渠道一并覆盖），密钥由账号自动开通。
+ * 默认模型仅在显式登录（adoptDefaults）或当前生图/视频/文本模型不可用时切到托管模型，
+ * 保证本地 override 选好的模型不会在每次启动时被抢走。
+ */
+export function applyYanluManagedChannel(apiKey: string, options?: { adoptDefaults?: boolean; textApiKey?: string }) {
+    useConfigStore.setState((state) => {
+        const managed = createModelChannel({
+            id: YANLU_CHANNEL_ID,
+            name: YANLU_CHANNEL_NAME,
+            baseUrl: YANLU_IMG_API_BASE_URL,
+            apiKey,
+            textApiKey: options?.textApiKey,
+            apiFormat: "openai",
+            models: YANLU_MANAGED_MODELS,
+        });
+        const channels = [managed];
+        const config = { ...state.config, channels, models: modelOptionsFromChannels(channels) };
+        const managedImage = encodeChannelModel(YANLU_CHANNEL_ID, YANLU_IMAGE_MODEL_NAME);
+        const managedVideo = encodeChannelModel(YANLU_CHANNEL_ID, YANLU_VIDEO_MODEL_NAME);
+        const managedText = encodeChannelModel(YANLU_CHANNEL_ID, YANLU_TEXT_MODEL_NAME);
+        const adoptImage = options?.adoptDefaults || !isAiConfigReady(config, config.imageModel);
+        const adoptVideo = options?.adoptDefaults || !isAiConfigReady(config, config.videoModel);
+        const adoptText = options?.adoptDefaults || !isAiConfigReady(config, config.textModel);
+        return {
+            config: {
+                ...config,
+                ...(adoptImage ? { imageModel: managedImage, model: managedImage } : {}),
+                ...(adoptVideo ? { videoModel: managedVideo } : {}),
+                ...(adoptText ? { textModel: managedText } : {}),
+            },
+        };
+    });
+    void applyLocalChannelOverride();
+}
+
+/** 退出登录时移除托管渠道；指向它的默认模型会被清空，下次生成动作会重新弹登录。 */
+export function removeYanluManagedChannel() {
+    useConfigStore.setState((state) => {
+        if (!state.config.channels.some((channel) => channel.id === YANLU_CHANNEL_ID)) return {};
+        const channels = state.config.channels.filter((channel) => channel.id !== YANLU_CHANNEL_ID);
+        if (!channels.length) channels.push(createModelChannel(defaultConfig.channels[0]));
+        const config = { ...state.config, channels, models: modelOptionsFromChannels(channels) };
+        return {
+            config: {
+                ...config,
+                model: normalizeModelOptionValue(config.model, channels),
+                imageModel: normalizeModelOptionValue(config.imageModel, channels),
+                videoModel: normalizeModelOptionValue(config.videoModel, channels),
+                textModel: normalizeModelOptionValue(config.textModel, channels),
+            },
+        };
+    });
+}
+
+export async function applyLocalChannelOverride() {
+    try {
+        const res = await fetch("/.local-channel.json", { cache: "no-store" });
+        if (!res.ok) return false;
+        const local = (await res.json()) as {
+            name?: string;
+            baseUrl?: string;
+            apiKey?: string;
+            models?: Array<string | ChannelModel>;
+            imageModel?: string;
+            videoModel?: string;
+            textModel?: string;
+            channels?: Partial<ModelChannel>[];
+        };
+        const sharedKey = String(local.apiKey || "").trim();
+        const sharedBase = String(local.baseUrl || "").trim();
+        const rawChannels: ModelChannelInput[] = Array.isArray(local.channels) && local.channels.length
+            ? local.channels
+            : [{ id: "default", name: local.name, baseUrl: sharedBase, apiKey: sharedKey, models: local.models }];
+        const channels = rawChannels.map((channel, index) =>
+            createModelChannel({
+                ...channel,
+                id: channel.id || (index === 0 ? "default" : `channel-${index + 1}`),
+                name: channel.name || local.name || i18n.t("config.channels.defaultName"),
+                baseUrl: channel.baseUrl || sharedBase,
+                apiKey: channel.apiKey || sharedKey,
+                apiFormat: channel.apiFormat || "openai",
+                models: channel.models || local.models,
+            }),
+        );
+        if (!channels.length || channels.some((channel) => !channel.baseUrl.trim() || !channel.apiKey.trim())) return false;
+        const imageValue = local.imageModel ? normalizeModelOptionValue(local.imageModel, channels) : "";
+        const videoValue = local.videoModel ? normalizeModelOptionValue(local.videoModel, channels) : "";
+        const textValue = local.textModel ? normalizeModelOptionValue(local.textModel, channels) : "";
+        useConfigStore.setState((state) => {
+            // 本地 override 不覆盖登录托管的研路AI渠道；已登录时启动流程随后还会重新断言它。
+            const managedChannel = state.config.channels.find((channel) => channel.id === YANLU_CHANNEL_ID);
+            const mergedChannels = managedChannel ? [...channels, managedChannel] : channels;
+            return {
+                config: {
+                    ...state.config,
+                    baseUrl: channels[0].baseUrl,
+                    apiKey: channels[0].apiKey,
+                    apiFormat: "openai",
+                    channels: mergedChannels,
+                    models: modelOptionsFromChannels(mergedChannels),
+                    imageModel: imageValue || state.config.imageModel,
+                    videoModel: videoValue || state.config.videoModel,
+                    textModel: textValue || state.config.textModel,
+                    model: imageValue || state.config.model,
+                },
+            };
+        });
+        return true;
+    } catch {
+        return false;
+    }
 }

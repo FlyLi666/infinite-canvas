@@ -9,7 +9,7 @@ import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, re
 import { runModelPlugin } from "./model-plugin";
 import type { ReferenceImage } from "@/types/image";
 
-type VideoResponse = { id: string; status?: string; error?: { message?: string }; url?: string; result_url?: string; video_url?: string; content?: { video_url?: string; url?: string } | null };
+type VideoResponse = { id?: string; request_id?: string; status?: string; error?: { message?: string }; url?: string; result_url?: string; video_url?: string; video?: { url?: string } | null; content?: { video_url?: string; url?: string } | null };
 type ApiVideoResponse = VideoResponse | { code?: number | string; data?: VideoResponse | null; msg?: string; message?: string; error?: { message?: string } };
 type ApiEnvelope<T> = T | { code?: number | string; data?: T | null; msg?: string; message?: string; error?: { message?: string } };
 type RequestOptions = { signal?: AbortSignal };
@@ -52,6 +52,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const script = resolveModelScript(config, selectedModel);
     if (script) return createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, options);
     assertVideoConfig(requestConfig, requestConfig.model);
+    if (isGrokImagineVideo(requestConfig.model)) return createGrokVideoTask(requestConfig, selectedModel, prompt, references, options);
     return createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
 }
 
@@ -62,6 +63,7 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
     }
     const requestConfig = resolveModelRequestConfig(config, task.model);
     assertVideoConfig(requestConfig, requestConfig.model);
+    if (isGrokImagineVideo(requestConfig.model) || isGrokImagineVideo(task.model)) return pollGrokVideoTask(requestConfig, task, options);
     return pollOpenAIVideoTask(requestConfig, task, options);
 }
 
@@ -114,6 +116,49 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
         }
     }
     throw new Error(apiText("noPlayableVideo"));
+}
+
+function isGrokImagineVideo(model: string) {
+    return modelOptionName(model).toLowerCase().includes("grok-imagine-video");
+}
+
+function videoTaskId(payload: VideoResponse) {
+    return (payload.id || payload.request_id || "").trim();
+}
+
+async function createGrokVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const body: Record<string, unknown> = {
+        model: modelOptionName(model),
+        prompt,
+        duration: Number(normalizeVideoSeconds(config.videoSeconds)),
+    };
+    if (references[0]) body.image = { url: await imageToDataUrl(references[0]) };
+    try {
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos/generations"), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
+        const id = videoTaskId(created);
+        if (!id) throw new Error(apiText("noVideoTaskId"));
+        return { id, provider: "openai", model };
+    } catch (error) {
+        throw new Error(readAxiosError(error, apiText("videoTaskCreateFailed")));
+    }
+}
+
+async function pollGrokVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    try {
+        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const url = videoResultUrl(video);
+        if (url) return { status: "completed", result: await videoResultFromUrl(url, options) };
+        const status = (video.status || "").toLowerCase();
+        if (status === "done" || status === "completed") {
+            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
+            await assertVideoBlob(content.data);
+            return { status: "completed", result: { blob: content.data } };
+        }
+        if (status === "failed" || status === "cancelled" || status === "expired") return { status: "failed", error: readApiErrorMessage(video.error?.message) || apiText("videoGenerationFailed") };
+        return { status: "pending" };
+    } catch (error) {
+        throw new Error(readAxiosError(error, apiText("videoTaskQueryFailed")));
+    }
 }
 
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
@@ -204,7 +249,7 @@ function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
 }
 
 function videoResultUrl(payload: VideoResponse) {
-    return [payload.video_url, payload.result_url, payload.url, payload.content?.video_url, payload.content?.url].find((url) => typeof url === "string" && (isPublicMediaUrl(url) || /\.mp4(\?|#|$)/i.test(url)));
+    return [payload.video_url, payload.result_url, payload.url, payload.video?.url, payload.content?.video_url, payload.content?.url].find((url) => typeof url === "string" && (isPublicMediaUrl(url) || /\.mp4(\?|#|$)/i.test(url)));
 }
 
 function readApiErrorMessage(value: unknown): string {

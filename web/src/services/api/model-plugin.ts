@@ -165,7 +165,7 @@ export type PluginVariable = { name: string; type: string; desc: string; capabil
 /** Documentation surface shown in the script editor. */
 export function getPluginVariables(): PluginVariable[] {
     return [
-        { name: "prompt", type: "string", desc: i18n.t("modelPlugin.variables.prompt"), capabilities: ["image", "video", "audio"] },
+        { name: "prompt", type: "string", desc: i18n.t("modelPlugin.variables.prompt"), capabilities: ["image", "video"] },
         { name: "images", type: "string[]", desc: i18n.t("modelPlugin.variables.images"), capabilities: ["image", "video"] },
         { name: "messages", type: "{ role, content }[]", desc: i18n.t("modelPlugin.variables.messages"), capabilities: ["text"] },
         { name: "params", type: "object", desc: i18n.t("modelPlugin.variables.params") },
@@ -287,39 +287,6 @@ return await poll(
   },
   { intervalMs: 5000, timeoutMs: 300000 },
 );`,
-        },
-    ],
-    audio: [
-        {
-            label: i18n.t("modelPlugin.templates.openai"),
-            script: `// ${i18n.t("modelPlugin.templates.audioOpenai")}
-return await request({
-  method: "post",
-  url: \`\${baseUrl}/v1/audio/speech\`,
-  headers: { "Content-Type": "application/json", Authorization: \`Bearer \${apiKey}\` },
-  responseType: "blob",
-  data: { model, input: prompt, voice: params.voice, response_format: params.format, speed: Number(params.speed) },
-});`,
-        },
-        {
-            label: i18n.t("modelPlugin.templates.gemini"),
-            script: `// ${i18n.t("modelPlugin.templates.audioGemini")}
-// ${i18n.t("modelPlugin.templates.availableAudioGemini")}
-const data = await request({
-  method: "post",
-  url: \`\${baseUrl}/v1beta/models/\${model}:generateContent\`,
-  headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-  data: {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: params.voice } } },
-    },
-  },
-});
-const audio = data.candidates?.[0]?.content?.parts?.map((p) => p.inlineData || p.inline_data).find(Boolean);
-if (!audio?.data) throw new Error(${JSON.stringify(i18n.t("modelPlugin.templates.geminiNoAudio"))});
-return { data: audio.data };`,
         },
     ],
     text: [

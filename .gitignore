@@ -9,6 +9,11 @@ data/
 .DS_Store
 .idea
 web/dist
+web/public/.local-channel.json
+.playwright-cli/
+**/.playwright-cli/
+output/
+docs/agent/
 
 **/dist
 web/public/plugins

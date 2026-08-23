@@ -15,7 +15,8 @@ import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } f
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
-import { requestEdit, requestGeneration } from "@/services/api/image";
+import { YANLU_PORTAL_URL } from "@/lib/yanlu-endpoints";
+import { describeImageTaskUpdate, ImageGenerationError, requestEdit, requestGeneration } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
@@ -38,6 +39,8 @@ type GenerationResult = {
     status: "pending" | "success" | "failed";
     image?: GeneratedImage;
     error?: string;
+    errorCode?: string;
+    statusText?: string;
 };
 
 type GenerationLog = {
@@ -326,16 +329,26 @@ export default function ImagePage() {
 
     const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
+        const requestOptions = {
+            onTaskUpdate: (update: Parameters<typeof describeImageTaskUpdate>[0]) => setResults((value) => updateResultAt(value, index, { statusText: describeImageTaskUpdate(update) })),
+        };
         try {
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
             const meta = await readImageMeta(image.dataUrl);
             const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
-            setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
+            setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage, statusText: undefined }));
             return nextImage;
         } catch (error) {
-            setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : t("workbench.generationFailed") }));
+            setResults((value) =>
+                updateResultAt(value, index, {
+                    status: "failed",
+                    error: error instanceof Error ? error.message : t("workbench.generationFailed"),
+                    errorCode: error instanceof ImageGenerationError ? error.code : undefined,
+                    statusText: undefined,
+                }),
+            );
             throw error;
         }
     };
@@ -501,8 +514,9 @@ export default function ImagePage() {
 
                     <div className="thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5">
                         <div className="mb-4 flex items-center justify-between gap-3">
-                            <div>
+                            <div className="min-w-0">
                                 <h2 className="text-xl font-semibold">{t("workbench.results")}</h2>
+                                <p className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">{t("common.localDataNotice")}</p>
                             </div>
                             {running ? <Tag className="m-0 px-2 py-1">{t("workbench.waiting", { time: formatDuration(elapsedMs) })}</Tag> : null}
                         </div>
@@ -512,9 +526,9 @@ export default function ImagePage() {
                                     result.status === "success" && result.image ? (
                                         <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
-                                        <FailedImageCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={() => retryResult(index)} />
+                                        <FailedImageCard key={result.id} error={result.error || t("workbench.generationFailed")} errorCode={result.errorCode} onRetry={() => retryResult(index)} />
                                     ) : (
-                                        <PendingImageCard key={result.id} />
+                                        <PendingImageCard key={result.id} label={result.statusText} />
                                     ),
                                 )}
                             </div>
@@ -627,7 +641,7 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard() {
+function PendingImageCard({ label }: { label?: string }) {
     const { t } = useTranslation();
     return (
         <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
@@ -638,16 +652,17 @@ function PendingImageCard() {
                     backgroundSize: "16px 16px",
                 }}
             />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-sm text-stone-500 dark:text-stone-400">
                 <LoaderCircle className="size-6 animate-spin" />
-                <span>{t("workbench.generating")}</span>
+                <span>{label || t("workbench.generating")}</span>
             </div>
         </div>
     );
 }
 
-function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+function FailedImageCard({ error, errorCode, onRetry }: { error: string; errorCode?: string; onRetry: () => void }) {
     const { t } = useTranslation();
+    const insufficientBalance = errorCode === "insufficient_balance";
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
@@ -656,7 +671,12 @@ function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => voi
                     {error}
                 </Typography.Paragraph>
             </div>
-            <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
+            <div className="flex justify-end gap-2 border-t border-red-200 p-3 dark:border-red-950">
+                {insufficientBalance ? (
+                    <Button size="small" type="primary" onClick={() => window.open(YANLU_PORTAL_URL, "_blank", "noopener,noreferrer")}>
+                        {t("imageWorkbench.goRecharge")}
+                    </Button>
+                ) : null}
                 <Button size="small" danger onClick={onRetry}>
                     {t("workbench.retry")}
                 </Button>

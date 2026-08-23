@@ -6,6 +6,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
+import { useImageTaskStore } from "@/stores/use-image-task-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeImage, type Position } from "@/types/canvas";
@@ -429,7 +430,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
-    if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
+    if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} showTaskStatus={props.node.type === CanvasNodeType.Image} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type as CanvasNodeType];
@@ -471,12 +472,15 @@ function GroupNodeContent({ node, theme, groupChildCount }: NodeContentRendererP
     );
 }
 
-function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
+function LoadingContent({ theme, showTaskStatus = false }: Pick<NodeContentRendererProps, "theme"> & { showTaskStatus?: boolean }) {
     const { t } = useTranslation();
+    // 研路AI异步生图为单任务串行，全局状态文本可直接标注排队位次 / 预计耗时。
+    const taskStatusText = useImageTaskStore((state) => state.statusText);
+    const label = (showTaskStatus && taskStatusText) || t("canvas.node.generating");
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.activeStroke }}>
             <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
-            <span className="text-[10px] tracking-[0.2em]">{t("canvas.node.generating")}</span>
+            <span className="px-3 text-center text-[10px] tracking-[0.2em]">{label}</span>
         </div>
     );
 }
@@ -485,7 +489,7 @@ function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "
     const { t } = useTranslation();
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
-            <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || t("canvas.node.failed")}</div>
+            <div className="max-h-24 overflow-y-auto break-words text-xs leading-5 text-red-300">{node.metadata?.errorDetails || t("canvas.node.failed")}</div>
             <button
                 type="button"
                 className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02]"
@@ -786,11 +790,12 @@ function BatchImageFailureActions({ placement, onRetry, onDelete }: { placement:
 function ImageSlotStatus({ image }: { image?: CanvasNodeImage }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
+    const taskStatusText = useImageTaskStore((state) => state.statusText);
     const failed = image?.status === "error";
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center" style={{ background: theme.node.fill, color: failed ? theme.node.text : theme.node.activeStroke }}>
-            {failed ? <span className="text-xs leading-5">{image.errorDetails || t("canvas.node.failed")}</span> : <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />}
-            {!failed ? <span className="text-[10px] tracking-[0.2em]">{t("canvas.node.generating")}</span> : null}
+            {failed ? <span className="max-h-24 overflow-y-auto break-words text-xs leading-5">{image.errorDetails || t("canvas.node.failed")}</span> : <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />}
+            {!failed ? <span className="text-[10px] tracking-[0.2em]">{taskStatusText || t("canvas.node.generating")}</span> : null}
         </div>
     );
 }

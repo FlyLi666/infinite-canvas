@@ -1,5 +1,14 @@
 # AGENTS.md
 
+本仓是 basketikun/infinite-canvas 的本地复原，对外品牌为 **研路AI / RIGEL**。
+UI 只出现「RIGEL」或「研路AI」，不要写 AL、aliuapi、内部主机或中转站地址。
+用户 API Key 只存在浏览器本地，禁止写入日志、文档或提交进 git。
+线上 Vite 产物没有可用 sourcemap，不要再 wget 整站当源码。
+开发入口：`cd web && npm run dev`，绑定 `127.0.0.1:3000`。
+交接地图：`docs/agent/PROJECT.md`、`docs/agent/STATE.md`、基础设施总图 `docs/agent/infra-plan.md`、画布切近节点 `docs/agent/dual-node-plan.md`。
+GitHub 链接保留上游仓（MIT 要求），不要改成 AL。
+未授权不要 commit / push。
+
 本文档用于约束本项目中的 AI / 自动化开发行为。开发时优先遵循本文件，其次遵循用户当前消息。
 
 ## 基本原则
@@ -86,3 +95,5 @@
 - Agent 对话消息必须同时按 `threadId`、`turnId` 和 `itemId` 归属；实时事件只用于补充未物化的 turn，历史快照成为权威后不得重复合并同一条消息。
 - Agent 通信协议版本与消息存储版本必须独立管理；消息存储格式升级时必须先备份再迁移，遇到未知版本、损坏清单或冲突备份时拒绝覆盖原文件，不得按记录数量或文件大小静默裁剪历史元数据。
 - 本地启动或浏览器验收时不要关闭用户已经打开的浏览器窗口或标签页；需要自动化验证时使用独立测试页面，避免打断用户当前页面和对话状态。
+- 登录、充值、密钥管理走研路AI 中转站（账本）。Grok / 文本生成走 `YANLU_CN_API_BASE_URL`（亚洲近节点 `https://gen-api.flyli.cn`），GPT Image 2 走 `YANLU_IMG_API_BASE_URL`。三个常量必须分开写；禁止把生成请求绑回门户常量。不要把托管渠道的生成打到 CPA 的 `api.flyli.cn`：那把钥匙不是研路密钥，也不会扣中转站余额。
+- `docs/agent/` 是内部交接文档，已写入 `.gitignore`，禁止提交或 push 到公开 origin。

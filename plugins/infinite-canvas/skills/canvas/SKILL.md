@@ -12,7 +12,7 @@ description: 操作 Infinite Canvas 当前网页画布，读取节点、选区�
 - 如果用户还没有打开或连接网页画布，使用 `open-canvas` 技能打开 Infinite Canvas，不要要求用户手动复制 URL 或 token。
 - 操作前先用 `canvas_get_state` 读取当前画布；如果用户明确提到选中内容、当前节点或“这个”，先用 `canvas_get_selection`。
 - 创建单个文本内容优先用 `canvas_create_text_node`。
-- 创建生成内容优先用 `canvas_generate_text`、`canvas_generate_image`、`canvas_generate_video`、`canvas_generate_audio`。
+- 创建生成内容优先用 `canvas_generate_text`、`canvas_generate_image`、`canvas_generate_video`。不要创建或生成音频/TTS。
 - 需要把提示词、配置和生成节点串成流程时，使用 `canvas_create_generation_flow` 或项目已有的流程工具。
 - 需要批量增删改、移动、连接节点或设置视口时，使用 `canvas_apply_ops`。
 - 不要模拟鼠标点击，不要要求用户手动复制 JSON。
