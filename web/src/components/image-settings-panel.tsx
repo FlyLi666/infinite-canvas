@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { clampImageCount, fallbackImageSizeForModel, filterImageAspects, modelCapabilities } from "@/lib/model-capabilities";
+import { clampImageCount, fallbackImageQualityForModel, fallbackImageSizeForModel, filterImageAspects, modelCapabilities } from "@/lib/model-capabilities";
 import { type AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
@@ -54,6 +54,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const count = clampImageCount(model, Number(config.count) || 1, maxCount);
     const activeSize = config.size || "auto";
     const visibleAspects = filterImageAspects(model, aspectOptions);
+    const visibleQualities = qualityOptions.filter((item) => !caps.qualityValues.length || caps.qualityValues.includes(item.value));
     const transparentBackground = config.background === "transparent";
     const selectedAspect = visibleAspects.find((item) => (item.size || item.value) === activeSize || item.value === activeSize) || visibleAspects[0];
 
@@ -61,6 +62,11 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
         const next = fallbackImageSizeForModel(model, activeSize);
         if (next !== activeSize) onConfigChange("size", next);
     }, [activeSize, model, onConfigChange]);
+    useEffect(() => {
+        if (!caps.quality) return;
+        const next = fallbackImageQualityForModel(model, quality);
+        if (next && next !== quality) onConfigChange("quality", next);
+    }, [caps.quality, model, onConfigChange, quality]);
     useEffect(() => {
         if (String(count) !== String(config.count || 1)) onConfigChange("count", String(count));
     }, [config.count, count, onConfigChange]);
@@ -95,7 +101,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <div className="space-y-2.5">
                         <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.quality")}</SettingTitle>
                         <div className="grid grid-cols-4 gap-2.5">
-                            {qualityOptions.map((item) => (
+                            {visibleQualities.map((item) => (
                                 <OptionPill key={item.value} selected={quality === item.value} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
                                     {t(`settingsPanels.common.${item.labelKey}`)}
                                 </OptionPill>

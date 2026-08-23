@@ -4,6 +4,7 @@ export type ImageSizeTier = "base" | "2k" | "4k";
 
 export type ModelCapabilities = {
     quality: boolean;
+    qualityValues: string[];
     transparentBackground: boolean;
     maxCount: number;
     imageSizeTiers: ImageSizeTier[];
@@ -11,6 +12,7 @@ export type ModelCapabilities = {
     videoResolutions: string[];
     videoResolutionCustom: boolean;
     videoSeconds: number[];
+    videoSecondsMin: number;
     videoSecondsMax: number;
     videoGenerateAudio: boolean;
     videoCustomPixels: boolean;
@@ -39,8 +41,12 @@ const GPT_IMAGE_SIZE_FALLBACK: Record<string, string> = {
 
 export const GROK_VIDEO_ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"] as const;
 
+const GPT_QUALITY = ["auto", "high", "medium", "low"];
+const GROK_IMAGE_2_QUALITY = ["low", "medium"];
+
 const OPEN: ModelCapabilities = {
     quality: true,
+    qualityValues: GPT_QUALITY,
     transparentBackground: true,
     maxCount: 15,
     imageSizeTiers: ["base", "2k", "4k"],
@@ -48,6 +54,7 @@ const OPEN: ModelCapabilities = {
     videoResolutions: ["720", "480"],
     videoResolutionCustom: true,
     videoSeconds: [6, 10, 12, 16, 20],
+    videoSecondsMin: 1,
     videoSecondsMax: 20,
     videoGenerateAudio: false,
     videoCustomPixels: true,
@@ -56,6 +63,7 @@ const OPEN: ModelCapabilities = {
 
 const GPT_IMAGE_2: ModelCapabilities = {
     quality: true,
+    qualityValues: GPT_QUALITY,
     transparentBackground: true,
     maxCount: 15,
     imageSizeTiers: ["base"],
@@ -63,6 +71,7 @@ const GPT_IMAGE_2: ModelCapabilities = {
     videoResolutions: [],
     videoResolutionCustom: false,
     videoSeconds: [],
+    videoSecondsMin: 1,
     videoSecondsMax: 20,
     videoGenerateAudio: false,
     videoCustomPixels: false,
@@ -71,6 +80,7 @@ const GPT_IMAGE_2: ModelCapabilities = {
 
 const GROK_IMAGE: ModelCapabilities = {
     quality: false,
+    qualityValues: [],
     transparentBackground: false,
     maxCount: 10,
     imageSizeTiers: ["base", "2k"],
@@ -78,6 +88,24 @@ const GROK_IMAGE: ModelCapabilities = {
     videoResolutions: [],
     videoResolutionCustom: false,
     videoSeconds: [],
+    videoSecondsMin: 1,
+    videoSecondsMax: 20,
+    videoGenerateAudio: false,
+    videoCustomPixels: false,
+    grokVideoApi: false,
+};
+
+const GROK_IMAGE_2: ModelCapabilities = {
+    quality: true,
+    qualityValues: GROK_IMAGE_2_QUALITY,
+    transparentBackground: false,
+    maxCount: 10,
+    imageSizeTiers: ["base", "2k"],
+    sizeFallback: GROK_IMAGE_SIZE_FALLBACK,
+    videoResolutions: [],
+    videoResolutionCustom: false,
+    videoSeconds: [],
+    videoSecondsMin: 1,
     videoSecondsMax: 20,
     videoGenerateAudio: false,
     videoCustomPixels: false,
@@ -86,6 +114,7 @@ const GROK_IMAGE: ModelCapabilities = {
 
 const GROK_VIDEO: ModelCapabilities = {
     quality: false,
+    qualityValues: [],
     transparentBackground: false,
     maxCount: 15,
     imageSizeTiers: [],
@@ -93,18 +122,45 @@ const GROK_VIDEO: ModelCapabilities = {
     videoResolutions: ["480", "720", "1080"],
     videoResolutionCustom: false,
     videoSeconds: [6, 10, 15],
+    videoSecondsMin: 1,
     videoSecondsMax: 15,
     videoGenerateAudio: true,
     videoCustomPixels: false,
     grokVideoApi: true,
 };
 
+const SEEDANCE_20: ModelCapabilities = {
+    quality: false,
+    qualityValues: [],
+    transparentBackground: false,
+    maxCount: 1,
+    imageSizeTiers: [],
+    sizeFallback: {},
+    videoResolutions: ["480", "720", "1080"],
+    videoResolutionCustom: false,
+    videoSeconds: [5, 10, 15],
+    videoSecondsMin: 4,
+    videoSecondsMax: 15,
+    videoGenerateAudio: true,
+    videoCustomPixels: false,
+    grokVideoApi: true,
+};
+
+const SEEDANCE_25: ModelCapabilities = {
+    ...SEEDANCE_20,
+    videoSeconds: [5, 10, 15, 30],
+    videoSecondsMax: 30,
+};
+
 const BY_NAME: Record<string, ModelCapabilities> = {
     "gpt-image-2": GPT_IMAGE_2,
     "grok-imagine-image": GROK_IMAGE,
     "grok-imagine-image-quality": GROK_IMAGE,
+    "grok-imagine-image-2.0": GROK_IMAGE_2,
     "grok-imagine-edit": GROK_IMAGE,
     "grok-imagine-video-1.5": GROK_VIDEO,
+    "seedance-2.0": SEEDANCE_20,
+    "seedance-2.5": SEEDANCE_25,
 };
 
 export function capabilityModelName(value: string) {
@@ -116,12 +172,44 @@ export function modelCapabilities(model: string): ModelCapabilities {
     const name = capabilityModelName(model);
     if (BY_NAME[name]) return BY_NAME[name];
     if (name.toLowerCase().includes("grok-imagine-video")) return GROK_VIDEO;
+    if (name.toLowerCase().startsWith("seedance-2.5")) return SEEDANCE_25;
+    if (name.toLowerCase().startsWith("seedance-")) return SEEDANCE_20;
     return OPEN;
 }
 
 export function isGrokImagineImageModel(value: string) {
     const name = capabilityModelName(value);
-    return name === "grok-imagine-image" || name === "grok-imagine-image-quality" || name === "grok-imagine-edit";
+    return name === "grok-imagine-image" || name === "grok-imagine-image-quality" || name === "grok-imagine-image-2.0" || name === "grok-imagine-edit";
+}
+
+export function supportsImageEdit(model: string) {
+    const name = capabilityModelName(model);
+    return name === "gpt-image-2" || name === "grok-imagine-image-2.0" || name === "grok-imagine-edit";
+}
+
+export function preferredImageEditModel(model: string) {
+    const name = capabilityModelName(model);
+    if (name === "gpt-image-2" || name === "grok-imagine-image-2.0") return model;
+    if (!isGrokImagineImageModel(model)) return model;
+    const separator = model.indexOf("::");
+    return separator >= 0 ? `${model.slice(0, separator + 2)}grok-imagine-image-2.0` : "grok-imagine-image-2.0";
+}
+
+export function preferredListedModel(model: string, options: string[]) {
+    if (!options.length) return model;
+    if (options.includes(model)) return model;
+    const mapped = preferredImageEditModel(model);
+    if (options.includes(mapped)) return mapped;
+    return options[0];
+}
+
+export function fallbackImageQualityForModel(model: string, quality: string) {
+    const values = modelCapabilities(model).qualityValues;
+    if (!values.length) return "";
+    const current = (quality || "").trim().toLowerCase();
+    if (values.includes(current)) return current;
+    if (values.includes("medium")) return "medium";
+    return values[0];
 }
 
 export function isGrokImagineVideoModel(value: string) {

@@ -3,7 +3,7 @@ import axios from "axios";
 import i18n from "@/i18n";
 import { humanizeGenerationError } from "@/lib/generation-errors";
 import { isYanluImageApiBaseUrl } from "@/lib/yanlu-endpoints";
-import { clampImageCount, modelCapabilities } from "@/lib/model-capabilities";
+import { clampImageCount, fallbackImageQualityForModel, modelCapabilities } from "@/lib/model-capabilities";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, useConfigStore, YANLU_CHANNEL_ID, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { refreshYanluBalance, useAuthStore } from "@/stores/use-auth-store";
 import { useImageTaskStore } from "@/stores/use-image-task-store";
@@ -964,7 +964,7 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
     }
-    const quality = caps.quality ? normalizeQuality(config.quality) : undefined;
+    const quality = caps.quality ? fallbackImageQualityForModel(selectedModel, normalizeQuality(config.quality) || config.quality) || undefined : undefined;
     const requestSize = resolveRequestSize(quality, config.size);
     const background = caps.transparentBackground ? normalizeBackground(config.background) : undefined;
     try {
@@ -982,7 +982,7 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
                                 ...(quality ? { quality } : {}),
                                 ...(requestSize ? { size: requestSize } : {}),
                                 ...(background ? { background } : {}),
-                                response_format: "b64_json",
+                                response_format: "url",
                                 output_format: IMAGE_OUTPUT_FORMAT,
                             },
                             {
@@ -1050,14 +1050,14 @@ async function requestEditInner(config: AiConfig, prompt: string, references: Re
         }
     }
 
-    const quality = caps.quality ? normalizeQuality(config.quality) : undefined;
+    const quality = caps.quality ? fallbackImageQualityForModel(selectedModel, normalizeQuality(config.quality) || config.quality) || undefined : undefined;
     const requestSize = resolveRequestSize(quality, config.size);
     const background = caps.transparentBackground ? normalizeBackground(config.background) : undefined;
     const formData = new FormData();
     formData.set("model", requestConfig.model);
     formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
     formData.set("n", String(n));
-    formData.set("response_format", "b64_json");
+    formData.set("response_format", "url");
     formData.set("output_format", IMAGE_OUTPUT_FORMAT);
     if (quality) {
         formData.set("quality", quality);

@@ -19,7 +19,19 @@ const videoLogStore = localforage.createInstance({ name: "infinite-canvas", stor
 const objectUrls = new Map<string, string>();
 
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
-    const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
+    if (typeof input === "string") {
+        try {
+            return persistImageBlob(await (await fetch(input)).blob());
+        } catch (error) {
+            if (!/^https?:/i.test(input)) throw error;
+            const meta = await readImageMeta(input).catch(() => ({ width: 0, height: 0, mimeType: "image/png" }));
+            return { url: input, storageKey: `image:${nanoid()}`, width: meta.width || 0, height: meta.height || 0, bytes: 0, mimeType: meta.mimeType || "image/png" };
+        }
+    }
+    return persistImageBlob(input);
+}
+
+async function persistImageBlob(blob: Blob): Promise<UploadedImage> {
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const url = URL.createObjectURL(blob);

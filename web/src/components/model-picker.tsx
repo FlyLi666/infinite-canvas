@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { preferredListedModel } from "@/lib/model-capabilities";
 import { modelOptionDescription, modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelPickerProps = {
@@ -23,8 +24,13 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
-    const current = value || "";
+    const current = value ? preferredListedModel(value, options) : options[0] || value || "";
     const pickerPlaceholder = placeholder || t("settingsPanels.model.select");
+
+    useEffect(() => {
+        if (!capability || !value || !options.length || options.includes(value)) return;
+        onChange(preferredListedModel(value, options));
+    }, [capability, onChange, options, value]);
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {

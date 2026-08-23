@@ -6,6 +6,8 @@ import type { UploadedFile } from "@/services/file-storage";
 import type { ReferenceImage } from "@/types/image";
 import { CanvasNodeType, type CanvasImageGenerationType, type CanvasNodeData, type CanvasNodeMetadata, type CanvasNodeTypeId, type Position } from "@/types/canvas";
 
+const NODE_PLACE_GAP = 96;
+
 export function createCanvasNode(type: CanvasNodeTypeId, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
     const spec = getNodeSpec(type);
     const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -21,6 +23,27 @@ export function createCanvasNode(type: CanvasNodeTypeId, position: Position, met
         height: spec.height,
         metadata: { ...spec.metadata, ...metadata },
     };
+}
+
+export function placeNewNodeCenter(type: CanvasNodeTypeId, preferred: Position, nodes: CanvasNodeData[], selectedIds?: Iterable<string>): Position {
+    const spec = getNodeSpec(type);
+    const selected = selectedIds ? nodes.find((node) => new Set(selectedIds).has(node.id)) : undefined;
+    const center = selected
+        ? { x: selected.position.x + selected.width + NODE_PLACE_GAP + spec.width / 2, y: selected.position.y + selected.height / 2 }
+        : preferred;
+    return offsetCenterFromOccupied(center, spec, nodes);
+}
+
+function offsetCenterFromOccupied(center: Position, spec: { width: number; height: number }, nodes: CanvasNodeData[]): Position {
+    const next = { ...center };
+    for (let i = 0; i < 16; i += 1) {
+        const left = next.x - spec.width / 2;
+        const top = next.y - spec.height / 2;
+        const hit = nodes.some((node) => left < node.position.x + node.width && left + spec.width > node.position.x && top < node.position.y + node.height && top + spec.height > node.position.y);
+        if (!hit) return next;
+        next.x += spec.width + NODE_PLACE_GAP;
+    }
+    return next;
 }
 
 export function imageMetadata(image: UploadedImage): CanvasNodeMetadata {

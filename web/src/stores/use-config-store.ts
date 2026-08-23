@@ -83,10 +83,11 @@ const YANLU_VIDEO_MODEL_NAME = "grok-imagine-video-1.5";
 const YANLU_TEXT_MODEL_NAME = "gpt-5.6-sol";
 const YANLU_MANAGED_MODELS: ChannelModel[] = [
     { name: "gpt-image-2", capability: "image" },
-    { name: "grok-imagine-image", capability: "image" },
-    { name: "grok-imagine-image-quality", capability: "image" },
-    { name: "grok-imagine-edit", capability: "image" },
+    { name: "grok-imagine-image-2.0", capability: "image" },
     { name: "grok-imagine-video-1.5", capability: "video" },
+    { name: "seedance-2.0", capability: "video" },
+    { name: "seedance-2.5", capability: "video" },
+    { name: "grok-4.6", capability: "text" },
     { name: "gpt-5.6-sol", capability: "text" },
     { name: "gpt-5.6-luna", capability: "text" },
     { name: "gpt-5.6-terra", capability: "text" },
@@ -100,8 +101,12 @@ const MODEL_CATALOG_KEYS: Record<string, string> = {
     "gpt-image-2": "gptImage2",
     "grok-imagine-image": "grokImagineImage",
     "grok-imagine-image-quality": "grokImagineImageQuality",
+    "grok-imagine-image-2.0": "grokImagineImage20",
     "grok-imagine-edit": "grokImagineEdit",
     "grok-imagine-video-1.5": "grokImagineVideo15",
+    "seedance-2.0": "seedance20",
+    "seedance-2.5": "seedance25",
+    "grok-4.6": "grok46",
     "gpt-5.6-sol": "gpt56Sol",
     "gpt-5.6-luna": "gpt56Luna",
     "gpt-5.6-terra": "gpt56Terra",
@@ -166,7 +171,7 @@ type ConfigStore = {
     clearPromptContinue: () => void;
 };
 
-const VIDEO_KEYWORDS = ["video", "sora", "veo", "kling", "wan", "hailuo"];
+const VIDEO_KEYWORDS = ["video", "sora", "veo", "kling", "wan", "hailuo", "seedance"];
 
 export function boolConfig(value: string, fallback: boolean) {
     return value ? value === "true" : fallback;
@@ -422,7 +427,7 @@ function resolveManagedModelBaseUrl(channel: ModelChannel, model: string) {
 /** 文本走 RIGEL-文本 Key；生图/Grok 走 RIGEL-图像 Key。两边都是当前登录用户自己的托管密钥。 */
 function resolveManagedModelApiKey(channel: ModelChannel, model: string) {
     if (channel.id !== YANLU_CHANNEL_ID) return channel.apiKey;
-    if (model.startsWith("gpt-image-") || model.startsWith("grok-")) return channel.apiKey;
+    if (model.startsWith("gpt-image-") || model.startsWith("grok-") || model.startsWith("seedance-")) return channel.apiKey;
     return channel.textApiKey?.trim() || "";
 }
 

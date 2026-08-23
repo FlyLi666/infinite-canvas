@@ -156,7 +156,7 @@ async function createGrokVideoTask(config: AiConfig, model: string, prompt: stri
     const body: Record<string, unknown> = {
         model: modelOptionName(model),
         prompt,
-        duration: Number(normalizeVideoSeconds(config.videoSeconds, caps.videoSecondsMax)),
+        duration: Number(normalizeVideoSeconds(config.videoSeconds, caps.videoSecondsMax, caps.videoSecondsMin)),
         resolution: normalizeGrokVideoResolution(config.vquality, model),
         aspect_ratio: grokVideoAspectRatio(config.size),
         generate_audio: boolConfig(config.videoGenerateAudio, caps.videoGenerateAudio),
@@ -178,7 +178,7 @@ async function pollGrokVideoTask(config: AiConfig, task: VideoGenerationTask, op
         const url = videoResultUrl(video);
         if (url) return { status: "completed", result: await videoResultFromUrl(url, options) };
         const status = (video.status || "").toLowerCase();
-        if (status === "done" || status === "completed") {
+        if (status === "done" || status === "completed" || status === "succeeded" || status === "success") {
             const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
             await assertVideoBlob(content.data);
             return { status: "completed", result: { blob: content.data } };
@@ -244,9 +244,9 @@ function assertVideoConfig(config: AiConfig, model: string) {
     if (config.apiFormat === "gemini") throw new Error(apiText("geminiVideoUnsupported"));
 }
 
-function normalizeVideoSeconds(value: string, max = 20) {
+function normalizeVideoSeconds(value: string, max = 20, min = 1) {
     const seconds = Math.floor(Number(value) || 6);
-    return String(Math.max(1, Math.min(max, seconds)));
+    return String(Math.max(min, Math.min(max, seconds)));
 }
 
 function normalizeVideoSize(value: string) {

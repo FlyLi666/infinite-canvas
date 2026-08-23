@@ -8,7 +8,8 @@ import { useTranslation } from "react-i18next";
 import { humanizeGenerationError } from "@/lib/generation-errors";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
-import { resolveModelForCapability, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { grokImageModelPatch, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { preferredImageEditModel } from "@/lib/model-capabilities";
 import { uploadImage } from "@/services/image-storage";
 import { uploadMediaFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -44,7 +45,7 @@ import { useAgentBridge } from "@/pages/canvas/hooks/use-agent-bridge";
 import { usePluginHost } from "@/pages/canvas/hooks/use-plugin-host";
 import { buildNodeMentionReferences, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
-import { applyNodeConfigPatch, audioMetadata, buildImageGenerationMetadata, createCanvasNode, imageMetadata, videoMetadata } from "@/lib/canvas/canvas-node-factory";
+import { applyNodeConfigPatch, audioMetadata, buildImageGenerationMetadata, createCanvasNode, imageMetadata, placeNewNodeCenter, videoMetadata } from "@/lib/canvas/canvas-node-factory";
 import { findContainingGroupId, findGroupDropTarget, getConnectionTargetAnchor, normalizeConnection, snapNodesIntoGroup } from "@/lib/canvas/canvas-node-geometry";
 import {
     audioExtension,
@@ -483,15 +484,22 @@ function InfiniteCanvasPage() {
             if (!exists) {
                 setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, fromNodeId, toNodeId }]);
             }
+            const fromNode = nodesRef.current.find((node) => node.id === fromNodeId);
+            if (fromNode?.type === CanvasNodeType.Image && fromNode.metadata?.content) {
+                setNodes((prev) => prev.map((node) => (node.id === toNodeId ? applyUpstreamImageEditModel(node, effectiveConfig) : node)));
+            }
             setContextMenu(null);
         },
-        [message, t],
+        [effectiveConfig, message, t],
     );
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video, pending: PendingConnectionCreate) => {
-            const metadata = type === CanvasNodeType.Config ? { model: resolveModelForCapability(effectiveConfig, undefined, "image"), size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
-            const newNode = createCanvasNode(type, pending.position, metadata);
+            const source = nodesRef.current.find((node) => node.id === pending.connection.nodeId);
+            const sourceIsImage = source?.type === CanvasNodeType.Image && Boolean(source.metadata?.content);
+            const imageModel = sourceIsImage ? preferredImageEditModel(resolveModelForCapability(effectiveConfig, undefined, "image")) : resolveModelForCapability(effectiveConfig, undefined, "image");
+            const metadata = type === CanvasNodeType.Config ? { model: imageModel, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
+            const newNode = createCanvasNode(type, placeNewNodeCenter(type, pending.position, nodesRef.current), metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
             if (!connection) {
                 message.warning(t("canvas.projectPage.configConnection"));
@@ -650,7 +658,7 @@ function InfiniteCanvasPage() {
     });
     const createNode = useCallback(
         (type: CanvasNodeTypeId, position?: Position) => {
-            const targetPosition = position || getCanvasCenter();
+            const targetPosition = placeNewNodeCenter(type, position || getCanvasCenter(), nodesRef.current, position ? undefined : selectedNodeIdsRef.current);
             const configMetadata =
                 type === CanvasNodeType.Config
                     ? {
@@ -2967,4 +2975,13 @@ function InfiniteCanvasPage() {
             </section>
         </main>
     );
+}
+
+function applyUpstreamImageEditModel(node: CanvasNodeData, config: AiConfig) {
+    const mode = node.type === CanvasNodeType.Config ? node.metadata?.generationMode || "image" : node.type === CanvasNodeType.Image ? "image" : null;
+    if (mode !== "image") return node;
+    const current = node.metadata?.model || resolveModelForCapability(config, undefined, "image");
+    const next = preferredImageEditModel(current);
+    if (next === current && node.metadata?.model === current) return node;
+    return applyNodeConfigPatch(node, grokImageModelPatch(next, node.metadata?.size || config.size));
 }

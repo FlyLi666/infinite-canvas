@@ -7,13 +7,32 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- New canvas nodes: with a node selected, adding Text / Image / Config should place the new node to the right with a gap, not on the same coordinates.
+
+- Image picker after sign-in should list only GPT 生图 and GROK 2.0 (no Fast / Photo / Legacy Edit). A leftover Fast / Photo / Edit selection should snap to GROK 2.0.
+
+- Text picker should list GROK 4.6 plus Sol / Luna / Terra. Default text stays Sol. A short GROK 4.6 chat should stream through `/v1/responses`.
+
+- Grok video requests should keep the product id `grok-imagine-video-1.5` all the way to CPA (no rewrite to `-preview` or old `grok-imagine-video`).
+
+- Connecting an upstream image to a config or image node should switch leftover GROK Fast / Photo selections to GROK 2.0 (edit-capable). GPT 生图 and GROK 2.0 stay as they are. Text / video mode must not switch.
+
+- Image-tab model picker: after switching a config node from Video back to Image, the dropdown must list only image models immediately (no leftover Grok Video / Seedance labels).
+
+- Image generation now requests `response_format=url` instead of a large `b64_json` body. A 1K Grok / Image 2.0 result should finish well under a minute on the workbench, then still appear in the result pane.
+
+- Model labels: picker should read GPT 生图 / GROK 2.0 / GROK 视频 / Seedance 2.0 / 2.5 / GROK 4.6 / Sol / Luna / Terra. Do not show Fast / Photo / Legacy Edit or “GROK-高质量”. English: GPT Image / GROK 2.0 / GROK Video / GROK 4.6.
+- Grok Image 2.0: image picker shows “GROK 2.0”; quality pills are only 低/中 (no auto/high); sizes stay 1K/2K with no 4K or transparent background; `n` ≤ 10; switching from auto/high falls back to 中.
+
+- Seedance video: video picker shows Seedance 2.0 / 2.5; 2.0 duration pills 5/10/15 (max 15, min 4); 2.5 also offers 30s; resolutions stay 480p/720p/1080p (no 4K). Retail A (official-aligned): 2.0 **$4.50 / $9.90 / $24.80** per second; 2.5 **$6.70 / $15.10 / $37.70**. 2.0 480p 5s stays **$22.50**; 2.5 480p 5s should now be **$33.50**; 2.0 1080p 5s **$124**; 2.5 1080p 5s **$188.50**.
+
 - Compose prompt: with compose enabled, connecting upstream text/images without writing `@` must send all connected resources (the output should reflect the upstream brief), and the badge counts must match what is actually sent. Writing `@[node:…]` still sends only the referenced items; unmentioned upstream resources stay out of the request and the badge.
 
 - Capability matrix / transparent background: Grok image, high-quality image, and edit must **hide** the transparent-background switch; GPT-image-2 still shows it. All other parameter behavior stays as in v0.17.4: GPT keeps base ratios only, Grok image hides 4K, Grok video keeps the three resolutions and 1–15s, Grok images omit `quality` and cap `n` at 10.
 
 - Grok video params: on canvas and the video workbench, Grok should show 480p / 720p / **1080p** pills only (no custom numeric input, no 360p). Duration options are 6 / 10 / 15 (or 1–15), not 16 / 20. Requests must send `resolution`, `aspect_ratio` (`16:9` etc., never pixel `size`), and `generate_audio`. Turning off “Generate audio” should produce a silent clip. Choosing 720p / 1080p bills at **$0.14 / $0.25 per second** (previously every request was actually 480p). A 1080p delivery around 1920×1088 is expected 16-alignment.
 
-- Grok images: requests must not send `quality`; `n` is capped at 10. GPT Image 2 still shows quality and count controls.
+- Grok images: Fast / High Quality / Edit must not send `quality`; Image 2.0 sends `low` or `medium`. `n` is capped at 10. GPT Image 2 still shows quality and count controls.
 
 - GPT image generation now bills a single 1K tier at $1 per image; aspect-ratio choices actually apply. Selecting `gpt-image-2` must hide every `(2k)` / `(4k)` size and keep only base ratios (1:1, 3:2, 2:3, 4:3, 3:4, 16:9, 9:16, auto). Switching to GPT with a 2K/4K size selected should fall back to the matching base ratio. Transparent background is GPT-only.
 
@@ -33,7 +52,7 @@ The current release needs manual verification in these areas:
 
 - Asia near-node generation: after this release, Grok image / edit / video and text should leave the portal and hit the Asia near-node door. Users should feel faster Grok and text generation than the previous portal hop; a low-balance account that can cover a 1K image should succeed at 1K instead of being blocked by the old flat hold; failure toasts and node errors should stay the same human-readable upstream reasons, not a new technical stack. Sign-in and top-up stay on the portal and still deduct the same Yanlu key and balance.
 
-- Yanlu AI managed models: after sign-in, the image picker should list GPT-image-2 (Create/Edit) (`gpt-image-2`), GROK Fast (No Editing) (`grok-imagine-image`), GROK High Quality (No Editing) (`grok-imagine-image-quality`), and GROK Edit Only (`grok-imagine-edit`); the video picker should list Grok Video 1.5 (`grok-imagine-video-1.5`); the text picker should list Sol (`gpt-5.6-sol`), Luna (`gpt-5.6-luna`), and Terra (`gpt-5.6-terra`). Default image remains `gpt-image-2`; default video should switch to `grok-imagine-video-1.5`; default text should switch to `gpt-5.6-sol`. GPT image generation should keep the async queue and finish via the managed Yanlu account (about 20–30s, not the previous slower fallback); Grok image, edit, video, and text should use the Asia near-node generation endpoint while sign-in and top-up stay on the portal, still deducting the same Yanlu key and balance. Canvas speech/TTS generation is removed: the toolbar, generation config, and settings should no longer expose audio models or audio generation; the video “Generate audio” toggle remains, and dropped MP3/WAV files can still be used as video references. The homepage and canvas chrome should not show a GitHub icon or Agent connection button, and opening a canvas should not auto-open the Agent panel.
+- Yanlu AI managed models: after sign-in, the image picker should list GPT Image (`gpt-image-2`) and GROK 2.0 (`grok-imagine-image-2.0`); the video picker should list Grok Video (`grok-imagine-video-1.5`) plus Seedance 2.0 / 2.5; the text picker should list GROK 4.6 (`grok-4.6`), Sol (`gpt-5.6-sol`), Luna (`gpt-5.6-luna`), and Terra (`gpt-5.6-terra`). Default image remains `gpt-image-2`; default video should stay `grok-imagine-video-1.5`; default text should stay `gpt-5.6-sol`. GPT image generation should keep the async queue and finish via the managed Yanlu account (about 20–30s, not the previous slower fallback); Grok image, edit, video, and text should use the Asia near-node generation endpoint while sign-in and top-up stay on the portal, still deducting the same Yanlu key and balance. Canvas speech/TTS generation is removed: the toolbar, generation config, and settings should no longer expose audio models or audio generation; the video “Generate audio” toggle remains, and dropped MP3/WAV files can still be used as video references. The homepage and canvas chrome should not show a GitHub icon or Agent connection button, and opening a canvas should not auto-open the Agent panel.
 
 - Managed channel after sign-in: localStorage must contain exactly one `id=yanlu` channel that holds both the image key and `textApiKey`. Text generation and Grok video must run without a “config not ready” modal or `Invalid API key`. The video picker and default must be `grok-imagine-video-1.5` only (no `1.5-preview`). New canvas image / config nodes default to 1 image. Failures should show Chinese copy for invalid key, insufficient balance, model not allowed, and 503/ledger unavailable; a not-ready text/video/image action should toast a visible reason before opening settings.
 

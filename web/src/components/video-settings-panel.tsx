@@ -52,7 +52,8 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
         }
         const secondsValue = Math.floor(Number(seconds) || 6);
         if (secondsValue > caps.videoSecondsMax) onConfigChange("videoSeconds", String(caps.videoSecondsMax));
-    }, [caps.videoResolutions, caps.videoSecondsMax, onConfigChange, resolution, seconds]);
+        if (secondsValue < caps.videoSecondsMin) onConfigChange("videoSeconds", String(caps.videoSecondsMin));
+    }, [caps.videoResolutions, caps.videoSecondsMax, caps.videoSecondsMin, onConfigChange, resolution, seconds]);
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -104,7 +105,7 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                 {value}s
                             </OptionPill>
                         ))}
-                        <NumberInput value={seconds} min={1} max={caps.videoSecondsMax} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                        <NumberInput value={seconds} min={caps.videoSecondsMin} max={caps.videoSecondsMax} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
                     </div>
                 </SettingGroup>
                 {caps.videoGenerateAudio ? (
