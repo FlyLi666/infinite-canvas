@@ -44,6 +44,13 @@ export default {
         queuedWaiting: "排队中",
         pendingEta: "生成中（约 30 秒）",
         retryWait: "服务繁忙，{{seconds}} 秒后自动重试",
+        configNotReady: "生成配置未就绪，请重新登录后重试",
+        errors: {
+            invalidApiKey: "密钥无效，请重新登录后重试",
+            insufficientBalance: "余额不足，请充值",
+            modelNotAllowed: "当前不能使用该模型",
+            serviceUnavailable: "服务暂时不可用，请稍后重试",
+        },
     },
     auth: {
         title: "研路AI 账号登录",

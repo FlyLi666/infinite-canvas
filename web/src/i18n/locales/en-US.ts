@@ -44,6 +44,13 @@ export default {
         queuedWaiting: "In queue",
         pendingEta: "Generating (about 30s)",
         retryWait: "Service busy. Retrying in {{seconds}}s",
+        configNotReady: "Generation is not ready. Sign in again and retry.",
+        errors: {
+            invalidApiKey: "The key is invalid. Sign in again and retry.",
+            insufficientBalance: "Insufficient balance. Please top up.",
+            modelNotAllowed: "This model is not available right now.",
+            serviceUnavailable: "The service is temporarily unavailable. Try again later.",
+        },
     },
     auth: {
         title: "Sign in to Yanlu AI",

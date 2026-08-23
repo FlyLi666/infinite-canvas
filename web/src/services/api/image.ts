@@ -1,6 +1,7 @@
 import axios from "axios";
 
 import i18n from "@/i18n";
+import { humanizeGenerationError } from "@/lib/generation-errors";
 import { isYanluImageApiBaseUrl } from "@/lib/yanlu-endpoints";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, useConfigStore, YANLU_CHANNEL_ID, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { useAuthStore } from "@/stores/use-auth-store";
@@ -517,15 +518,15 @@ function readAxiosError(error: unknown, fallback: string) {
         const responseData = error.response?.data;
         // Prefer the API error from the response body.
         const apiMsg = readApiErrorMessage(responseData);
-        if (apiMsg) return apiMsg;
+        if (apiMsg) return humanizeGenerationError(apiMsg, fallback);
         // Infer the error from the HTTP status when the response body has no usable message.
         const statusMsg = readStatusError(error.response?.status, fallback);
-        if (statusMsg) return statusMsg;
+        if (statusMsg) return humanizeGenerationError(statusMsg, fallback);
         // Fall back to Axios's own error message.
-        return error.message || fallback;
+        return humanizeGenerationError(error.message || fallback, fallback);
     }
     if (error instanceof DOMException && error.name === "AbortError") return apiText("requestCanceled");
-    return error instanceof Error ? readApiErrorMessage(error.message) || error.message : fallback;
+    return humanizeGenerationError(error instanceof Error ? readApiErrorMessage(error.message) || error.message : fallback, fallback);
 }
 
 function readStatusError(status: number | undefined, fallback: string) {

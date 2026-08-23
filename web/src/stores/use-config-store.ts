@@ -100,7 +100,7 @@ export const defaultConfig: AiConfig = {
     size: "1:1",
     background: "",
     count: "1",
-    canvasImageCount: "3",
+    canvasImageCount: "1",
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
@@ -256,7 +256,7 @@ export const useConfigStore = create<ConfigStore>()(
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
-                        canvasImageCount: config.canvasImageCount || "3",
+                        canvasImageCount: config.canvasImageCount || "1",
                     },
                 };
             },
@@ -466,6 +466,10 @@ const YANLU_MANAGED_MODELS: ChannelModel[] = [
  * 默认模型仅在显式登录（adoptDefaults）或当前生图/视频/文本模型不可用时切到托管模型，
  * 保证本地 override 选好的模型不会在每次启动时被抢走。
  */
+function upsertYanluChannel(channels: ModelChannel[], managed: ModelChannel) {
+    return [managed, ...channels.filter((channel) => channel.id !== YANLU_CHANNEL_ID)];
+}
+
 export function applyYanluManagedChannel(apiKey: string, options?: { adoptDefaults?: boolean; textApiKey?: string }) {
     useConfigStore.setState((state) => {
         const managed = createModelChannel({
@@ -477,7 +481,7 @@ export function applyYanluManagedChannel(apiKey: string, options?: { adoptDefaul
             apiFormat: "openai",
             models: YANLU_MANAGED_MODELS,
         });
-        const channels = [managed];
+        const channels = retainPublicChannels(upsertYanluChannel(state.config.channels, managed));
         const config = { ...state.config, channels, models: modelOptionsFromChannels(channels) };
         const managedImage = encodeChannelModel(YANLU_CHANNEL_ID, YANLU_IMAGE_MODEL_NAME);
         const managedVideo = encodeChannelModel(YANLU_CHANNEL_ID, YANLU_VIDEO_MODEL_NAME);
@@ -546,14 +550,15 @@ export async function applyLocalChannelOverride() {
                 models: channel.models || local.models,
             }),
         );
-        if (!channels.length || channels.some((channel) => !channel.baseUrl.trim() || !channel.apiKey.trim())) return false;
-        const imageValue = local.imageModel ? normalizeModelOptionValue(local.imageModel, channels) : "";
-        const videoValue = local.videoModel ? normalizeModelOptionValue(local.videoModel, channels) : "";
-        const textValue = local.textModel ? normalizeModelOptionValue(local.textModel, channels) : "";
+        const localChannels = channels.filter((channel) => channel.id !== YANLU_CHANNEL_ID);
+        if (!localChannels.length || localChannels.some((channel) => !channel.baseUrl.trim() || !channel.apiKey.trim())) return false;
         useConfigStore.setState((state) => {
-            // 本地 override 不覆盖登录托管的研路AI渠道；已登录时启动流程随后还会重新断言它。
+            // 本地 override 不得再写入一份 yanlu；登录开通的托管渠道按 id 只保留一份。
             const managedChannel = state.config.channels.find((channel) => channel.id === YANLU_CHANNEL_ID);
-            const mergedChannels = managedChannel ? [...channels, managedChannel] : channels;
+            const mergedChannels = managedChannel ? upsertYanluChannel(localChannels, managedChannel) : localChannels;
+            const imageValue = local.imageModel ? normalizeModelOptionValue(local.imageModel, mergedChannels) : "";
+            const videoValue = local.videoModel ? normalizeModelOptionValue(local.videoModel, mergedChannels) : "";
+            const textValue = local.textModel ? normalizeModelOptionValue(local.textModel, mergedChannels) : "";
             return {
                 config: {
                     ...state.config,
