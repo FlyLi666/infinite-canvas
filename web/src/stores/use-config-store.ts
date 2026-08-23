@@ -93,6 +93,10 @@ export function isGrokImagineImageModel(value: string) {
     return GROK_IMAGE_MODELS.has(modelOptionName(value));
 }
 
+export function isGrokImagineVideoModel(value: string) {
+    return modelOptionName(value).toLowerCase().includes("grok-imagine-video");
+}
+
 export function fallbackGrokImageSize(size: string) {
     return GROK_SIZE_FALLBACK[size] || size;
 }

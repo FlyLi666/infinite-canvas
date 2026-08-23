@@ -7,7 +7,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { refreshYanluBalance } from "@/stores/use-auth-store";
-import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
+import { boolConfig, buildApiUrl, isGrokImagineVideoModel, modelOptionName, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
 import type { ReferenceImage } from "@/types/image";
 
@@ -59,7 +59,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
         const script = resolveModelScript(config, selectedModel);
         if (script) return await createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, options);
         assertVideoConfig(requestConfig, requestConfig.model);
-        if (isGrokImagineVideo(requestConfig.model)) return await createGrokVideoTask(requestConfig, selectedModel, prompt, references, options);
+        if (isGrokImagineVideoModel(requestConfig.model)) return await createGrokVideoTask(requestConfig, selectedModel, prompt, references, options);
         return await createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
     } catch (error) {
         refreshYanluBalance();
@@ -85,7 +85,7 @@ async function pollVideoGenerationTaskInner(config: AiConfig, task: VideoGenerat
     }
     const requestConfig = resolveModelRequestConfig(config, task.model);
     assertVideoConfig(requestConfig, requestConfig.model);
-    if (isGrokImagineVideo(requestConfig.model) || isGrokImagineVideo(task.model)) return pollGrokVideoTask(requestConfig, task, options);
+    if (isGrokImagineVideoModel(requestConfig.model) || isGrokImagineVideoModel(task.model)) return pollGrokVideoTask(requestConfig, task, options);
     return pollOpenAIVideoTask(requestConfig, task, options);
 }
 
@@ -140,19 +140,46 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
     throw new Error(apiText("noPlayableVideo"));
 }
 
-function isGrokImagineVideo(model: string) {
-    return modelOptionName(model).toLowerCase().includes("grok-imagine-video");
-}
-
 function videoTaskId(payload: VideoResponse) {
     return (payload.id || payload.request_id || "").trim();
+}
+
+const GROK_VIDEO_RESOLUTIONS = new Set(["480p", "720p", "1080p"]);
+const GROK_VIDEO_RATIOS = [
+    { label: "16:9", ratio: 16 / 9 },
+    { label: "9:16", ratio: 9 / 16 },
+    { label: "1:1", ratio: 1 },
+    { label: "4:3", ratio: 4 / 3 },
+    { label: "3:4", ratio: 3 / 4 },
+    { label: "3:2", ratio: 3 / 2 },
+    { label: "2:3", ratio: 2 / 3 },
+] as const;
+
+function normalizeGrokVideoResolution(value: string) {
+    const resolution = normalizeVideoResolution(value);
+    return GROK_VIDEO_RESOLUTIONS.has(resolution) ? resolution : "720p";
+}
+
+function grokVideoAspectRatio(size: string) {
+    const allowed = GROK_VIDEO_RATIOS.find((item) => item.label === size);
+    if (allowed) return allowed.label;
+    const match = (size || "").match(/^(\d+)x(\d+)$/);
+    if (!match) return "16:9";
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!width || !height) return "16:9";
+    const current = width / height;
+    return GROK_VIDEO_RATIOS.reduce((best, item) => (Math.abs(item.ratio - current) < Math.abs(best.ratio - current) ? item : best)).label;
 }
 
 async function createGrokVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
     const body: Record<string, unknown> = {
         model: modelOptionName(model),
         prompt,
-        duration: Number(normalizeVideoSeconds(config.videoSeconds)),
+        duration: Number(normalizeVideoSeconds(config.videoSeconds, 15)),
+        resolution: normalizeGrokVideoResolution(config.vquality),
+        aspect_ratio: grokVideoAspectRatio(config.size),
+        generate_audio: boolConfig(config.videoGenerateAudio, true),
     };
     if (references[0]) body.image = { url: await imageToDataUrl(references[0]) };
     try {
@@ -237,9 +264,9 @@ function assertVideoConfig(config: AiConfig, model: string) {
     if (config.apiFormat === "gemini") throw new Error(apiText("geminiVideoUnsupported"));
 }
 
-function normalizeVideoSeconds(value: string) {
+function normalizeVideoSeconds(value: string, max = 20) {
     const seconds = Math.floor(Number(value) || 6);
-    return String(Math.max(1, Math.min(20, seconds)));
+    return String(Math.max(1, Math.min(max, seconds)));
 }
 
 function normalizeVideoSize(value: string) {

@@ -46,10 +46,12 @@ type ImageSettingsPanelProps = {
 export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
     const { t } = useTranslation();
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
+    const grokImage = isGrokImagineImageModel(config.model || config.imageModel);
+    const countCap = grokImage ? Math.min(maxCount, 10) : maxCount;
     const quality = config.quality || "auto";
-    const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const count = Math.max(1, Math.min(countCap, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
-    const hideGrok4k = isGrokImagineImageModel(config.model || config.imageModel);
+    const hideGrok4k = grokImage;
     const visibleAspects = hideGrok4k ? aspectOptions.filter((item) => !item.value.endsWith("-4k")) : aspectOptions;
     const transparentBackground = config.background === "transparent";
     const selectedAspect = visibleAspects.find((item) => (item.size || item.value) === activeSize || item.value === activeSize) || visibleAspects[0];
@@ -59,6 +61,11 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
         const next = fallbackGrokImageSize(activeSize);
         if (next !== activeSize) onConfigChange("size", next);
     }, [activeSize, hideGrok4k, onConfigChange]);
+    useEffect(() => {
+        if (!grokImage) return;
+        const next = Math.max(1, Math.min(countCap, Math.floor(Math.abs(Number(config.count)) || 1)));
+        if (String(next) !== String(config.count || 1)) onConfigChange("count", String(next));
+    }, [config.count, countCap, grokImage, onConfigChange]);
     const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
     const selectAspect = (value: string) => {
         const option = aspectOptions.find((item) => item.value === value);
@@ -83,16 +90,18 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 }}
             >
                 {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.image.title")}</div> : null}
-                <div className="space-y-2.5">
-                    <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.quality")}</SettingTitle>
-                    <div className="grid grid-cols-4 gap-2.5">
-                        {qualityOptions.map((item) => (
-                            <OptionPill key={item.value} selected={quality === item.value} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
-                                {t(`settingsPanels.common.${item.labelKey}`)}
-                            </OptionPill>
-                        ))}
+                {grokImage ? null : (
+                    <div className="space-y-2.5">
+                        <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.quality")}</SettingTitle>
+                        <div className="grid grid-cols-4 gap-2.5">
+                            {qualityOptions.map((item) => (
+                                <OptionPill key={item.value} selected={quality === item.value} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
+                                    {t(`settingsPanels.common.${item.labelKey}`)}
+                                </OptionPill>
+                            ))}
+                        </div>
                     </div>
-                </div>
+                )}
                 <div className="space-y-2.5">
                     <div className="flex items-center justify-between gap-3">
                         <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.size")}</SettingTitle>
@@ -148,7 +157,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                 {t("settingsPanels.image.images", { count: value })}
                             </OptionPill>
                         ))}
-                        <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
+                        <CountInput value={count} max={countCap} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
                     </div>
                 </div>
             </div>
