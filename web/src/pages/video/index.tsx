@@ -18,7 +18,8 @@ import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
-import { boolConfig, isGrokImagineVideoModel, modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { modelCapabilities } from "@/lib/model-capabilities";
+import { boolConfig, modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
 import i18n from "@/i18n";
@@ -770,13 +771,12 @@ function buildLog({ prompt, model, config, references, durationMs, status, task,
 }
 
 function buildVideoConfig(config: AiConfig, model: string): AiConfig {
-    const grokVideo = isGrokImagineVideoModel(model);
     return {
         ...config,
         model,
         videoModel: model,
         size: normalizeVideoSize(config.size),
-        videoSeconds: normalizeVideoSeconds(config.videoSeconds, grokVideo ? 15 : 20),
+        videoSeconds: normalizeVideoSeconds(config.videoSeconds, modelCapabilities(model).videoSecondsMax),
         vquality: normalizeResolution(config.vquality),
         videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),
         videoWatermark: String(boolConfig(config.videoWatermark, false)),

@@ -3,7 +3,8 @@ import axios from "axios";
 import i18n from "@/i18n";
 import { humanizeGenerationError } from "@/lib/generation-errors";
 import { isYanluImageApiBaseUrl } from "@/lib/yanlu-endpoints";
-import { buildApiUrl, isGrokImagineImageModel, resolveModelRequestConfig, resolveModelScript, useConfigStore, YANLU_CHANNEL_ID, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { clampImageCount, modelCapabilities } from "@/lib/model-capabilities";
+import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, useConfigStore, YANLU_CHANNEL_ID, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { refreshYanluBalance, useAuthStore } from "@/stores/use-auth-store";
 import { useImageTaskStore } from "@/stores/use-image-task-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
@@ -933,8 +934,9 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 
 async function requestGenerationInner(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
-    const grokImage = isGrokImagineImageModel(requestConfig.model || config.model || config.imageModel);
-    const n = Math.max(1, Math.min(grokImage ? 10 : 15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const selectedModel = requestConfig.model || config.model || config.imageModel;
+    const caps = modelCapabilities(selectedModel);
+    const n = clampImageCount(selectedModel, Number(config.count) || 1);
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {
         const quality = normalizeQuality(config.quality);
@@ -962,9 +964,9 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
     }
-    const quality = grokImage ? undefined : normalizeQuality(config.quality);
+    const quality = caps.quality ? normalizeQuality(config.quality) : undefined;
     const requestSize = resolveRequestSize(quality, config.size);
-    const background = normalizeBackground(config.background);
+    const background = caps.transparentBackground ? normalizeBackground(config.background) : undefined;
     try {
         return await runManagedImageRequest(
             requestConfig,
@@ -1014,8 +1016,9 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 
 async function requestEditInner(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
-    const grokImage = isGrokImagineImageModel(requestConfig.model || config.model || config.imageModel);
-    const n = Math.max(1, Math.min(grokImage ? 10 : 15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const selectedModel = requestConfig.model || config.model || config.imageModel;
+    const caps = modelCapabilities(selectedModel);
+    const n = clampImageCount(selectedModel, Number(config.count) || 1);
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {
@@ -1047,9 +1050,9 @@ async function requestEditInner(config: AiConfig, prompt: string, references: Re
         }
     }
 
-    const quality = grokImage ? undefined : normalizeQuality(config.quality);
+    const quality = caps.quality ? normalizeQuality(config.quality) : undefined;
     const requestSize = resolveRequestSize(quality, config.size);
-    const background = normalizeBackground(config.background);
+    const background = caps.transparentBackground ? normalizeBackground(config.background) : undefined;
     const formData = new FormData();
     formData.set("model", requestConfig.model);
     formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));

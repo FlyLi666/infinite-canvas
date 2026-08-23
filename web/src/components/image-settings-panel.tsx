@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { fallbackGptImageSize, fallbackGrokImageSize, isGptImage2Model, isGrokImagineImageModel, type AiConfig } from "@/stores/use-config-store";
+import { clampImageCount, fallbackImageSizeForModel, filterImageAspects, modelCapabilities } from "@/lib/model-capabilities";
+import { type AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
     { value: "auto", labelKey: "auto" },
@@ -46,29 +47,26 @@ type ImageSettingsPanelProps = {
 export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
     const { t } = useTranslation();
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
-    const grokImage = isGrokImagineImageModel(config.model || config.imageModel);
-    const gptImage = isGptImage2Model(config.model || config.imageModel);
-    const countCap = grokImage ? Math.min(maxCount, 10) : maxCount;
+    const model = config.model || config.imageModel;
+    const caps = modelCapabilities(model);
+    const countCap = Math.min(maxCount, caps.maxCount);
     const quality = config.quality || "auto";
-    const count = Math.max(1, Math.min(countCap, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const count = clampImageCount(model, Number(config.count) || 1, maxCount);
     const activeSize = config.size || "auto";
-    const visibleAspects = gptImage
-        ? aspectOptions.filter((item) => !item.value.endsWith("-2k") && !item.value.endsWith("-4k"))
-        : grokImage
-            ? aspectOptions.filter((item) => !item.value.endsWith("-4k"))
-            : aspectOptions;
+    const visibleAspects = filterImageAspects(model, aspectOptions);
     const transparentBackground = config.background === "transparent";
     const selectedAspect = visibleAspects.find((item) => (item.size || item.value) === activeSize || item.value === activeSize) || visibleAspects[0];
 
     useEffect(() => {
-        const next = gptImage ? fallbackGptImageSize(activeSize) : grokImage ? fallbackGrokImageSize(activeSize) : activeSize;
+        const next = fallbackImageSizeForModel(model, activeSize);
         if (next !== activeSize) onConfigChange("size", next);
-    }, [activeSize, gptImage, grokImage, onConfigChange]);
+    }, [activeSize, model, onConfigChange]);
     useEffect(() => {
-        if (!grokImage) return;
-        const next = Math.max(1, Math.min(countCap, Math.floor(Math.abs(Number(config.count)) || 1)));
-        if (String(next) !== String(config.count || 1)) onConfigChange("count", String(next));
-    }, [config.count, countCap, grokImage, onConfigChange]);
+        if (String(count) !== String(config.count || 1)) onConfigChange("count", String(count));
+    }, [config.count, count, onConfigChange]);
+    useEffect(() => {
+        if (!caps.transparentBackground && config.background === "transparent") onConfigChange("background", "");
+    }, [caps.transparentBackground, config.background, onConfigChange]);
     const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
     const selectAspect = (value: string) => {
         const option = aspectOptions.find((item) => item.value === value);
@@ -93,7 +91,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 }}
             >
                 {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.image.title")}</div> : null}
-                {grokImage ? null : (
+                {caps.quality ? (
                     <div className="space-y-2.5">
                         <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.quality")}</SettingTitle>
                         <div className="grid grid-cols-4 gap-2.5">
@@ -104,7 +102,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                             ))}
                         </div>
                     </div>
-                )}
+                ) : null}
                 <div className="space-y-2.5">
                     <div className="flex items-center justify-between gap-3">
                         <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.size")}</SettingTitle>
@@ -141,17 +139,19 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         ))}
                     </div>
                 </div>
-                <div className="flex items-center justify-between gap-3">
-                    <div className="space-y-0.5">
-                        <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.transparent")}</SettingTitle>
-                        <div className="text-xs" style={{ color: theme.node.muted, opacity: 0.75 }}>
-                            {t("settingsPanels.image.transparentHint")}
+                {caps.transparentBackground ? (
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                            <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.transparent")}</SettingTitle>
+                            <div className="text-xs" style={{ color: theme.node.muted, opacity: 0.75 }}>
+                                {t("settingsPanels.image.transparentHint")}
+                            </div>
                         </div>
+                        <span onMouseDown={(event) => event.stopPropagation()}>
+                            <Switch size="small" checked={transparentBackground} onChange={(checked) => onConfigChange("background", checked ? "transparent" : "")} />
+                        </span>
                     </div>
-                    <span onMouseDown={(event) => event.stopPropagation()}>
-                        <Switch size="small" checked={transparentBackground} onChange={(checked) => onConfigChange("background", checked ? "transparent" : "")} />
-                    </span>
-                </div>
+                ) : null}
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.count")}</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">

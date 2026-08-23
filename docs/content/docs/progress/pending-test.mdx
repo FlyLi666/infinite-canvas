@@ -7,11 +7,13 @@ description: Implemented changes that still need manual verification
 
 The current release needs manual verification in these areas:
 
+- Capability matrix / transparent background: Grok image, high-quality image, and edit must **hide** the transparent-background switch; GPT-image-2 still shows it. All other parameter behavior stays as in v0.17.4: GPT keeps base ratios only, Grok image hides 4K, Grok video keeps the three resolutions and 1–15s, Grok images omit `quality` and cap `n` at 10.
+
 - Grok video params: on canvas and the video workbench, Grok should show 480p / 720p / **1080p** pills only (no custom numeric input, no 360p). Duration options are 6 / 10 / 15 (or 1–15), not 16 / 20. Requests must send `resolution`, `aspect_ratio` (`16:9` etc., never pixel `size`), and `generate_audio`. Turning off “Generate audio” should produce a silent clip. Choosing 720p / 1080p bills at **$0.14 / $0.25 per second** (previously every request was actually 480p). A 1080p delivery around 1920×1088 is expected 16-alignment.
 
 - Grok images: requests must not send `quality`; `n` is capped at 10. GPT Image 2 still shows quality and count controls.
 
-- GPT image generation now bills a single 1K tier at $1 per image; aspect-ratio choices actually apply. Selecting `gpt-image-2` must hide every `(2k)` / `(4k)` size and keep only base ratios (1:1, 3:2, 2:3, 4:3, 3:4, 16:9, 9:16, auto). Switching to GPT with a 2K/4K size selected should fall back to the matching base ratio. Transparent background and other options stay.
+- GPT image generation now bills a single 1K tier at $1 per image; aspect-ratio choices actually apply. Selecting `gpt-image-2` must hide every `(2k)` / `(4k)` size and keep only base ratios (1:1, 3:2, 2:3, 4:3, 3:4, 16:9, 9:16, auto). Switching to GPT with a 2K/4K size selected should fall back to the matching base ratio. Transparent background is GPT-only.
 
 - Model display names: after sign-in, the image picker should show “GPT-image-2 (Create/Edit) / GROK Fast (No Editing) / GROK High Quality (No Editing) / GROK Edit Only (Yanlu AI)” with a one-line hint; video should show “Grok Video 1.5”; text should show Sol / Luna / Terra. Stored values and requests must still use technical ids. Switching to 简体中文 should show the Chinese product labels. Selecting any Grok image/edit model must hide `16:9(4k)` / `9:16(4k)`; switching to Grok with a 4K size selected should fall back to the matching 2K size.
 

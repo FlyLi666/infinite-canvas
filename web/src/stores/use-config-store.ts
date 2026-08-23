@@ -4,8 +4,18 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
+import { fallbackImageSizeForModel } from "@/lib/model-capabilities";
 import { isYanluSameOriginProxyHost, YANLU_CN_API_BASE_URL, YANLU_IMG_API_BASE_URL } from "@/lib/yanlu-endpoints";
 import { useAuthStore } from "@/stores/use-auth-store";
+
+export {
+    fallbackGptImageSize,
+    fallbackGrokImageSize,
+    fallbackImageSizeForModel,
+    isGptImage2Model,
+    isGrokImagineImageModel,
+    isGrokImagineVideoModel,
+} from "@/lib/model-capabilities";
 
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text";
@@ -81,52 +91,6 @@ const YANLU_MANAGED_MODELS: ChannelModel[] = [
     { name: "gpt-5.6-luna", capability: "text" },
     { name: "gpt-5.6-terra", capability: "text" },
 ];
-const GROK_IMAGE_MODELS = new Set(["grok-imagine-image", "grok-imagine-image-quality", "grok-imagine-edit"]);
-const GROK_SIZE_FALLBACK: Record<string, string> = {
-    "16:9-4k": "2048x1152",
-    "9:16-4k": "1152x2048",
-    "3840x2160": "2048x1152",
-    "2160x3840": "1152x2048",
-};
-const GPT_SIZE_FALLBACK: Record<string, string> = {
-    "1:1-2k": "1:1",
-    "16:9-2k": "16:9",
-    "9:16-2k": "9:16",
-    "16:9-4k": "16:9",
-    "9:16-4k": "9:16",
-    "2048x2048": "1:1",
-    "2048x1152": "16:9",
-    "1152x2048": "9:16",
-    "3840x2160": "16:9",
-    "2160x3840": "9:16",
-};
-
-export function isGrokImagineImageModel(value: string) {
-    return GROK_IMAGE_MODELS.has(modelOptionName(value));
-}
-
-export function isGrokImagineVideoModel(value: string) {
-    return modelOptionName(value).toLowerCase().includes("grok-imagine-video");
-}
-
-export function isGptImage2Model(value: string) {
-    return modelOptionName(value) === "gpt-image-2";
-}
-
-export function fallbackGrokImageSize(size: string) {
-    return GROK_SIZE_FALLBACK[size] || size;
-}
-
-export function fallbackGptImageSize(size: string) {
-    return GPT_SIZE_FALLBACK[size] || size;
-}
-
-export function fallbackImageSizeForModel(model: string, size: string) {
-    if (isGrokImagineImageModel(model)) return fallbackGrokImageSize(size);
-    if (isGptImage2Model(model)) return fallbackGptImageSize(size);
-    return size;
-}
-
 export function grokImageModelPatch(model: string, size?: string) {
     const nextSize = fallbackImageSizeForModel(model, size || "");
     return nextSize === (size || "") ? { model } : { model, size: nextSize };

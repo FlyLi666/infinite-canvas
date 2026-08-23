@@ -5,20 +5,8 @@ import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { boolConfig, isGrokImagineVideoModel, type AiConfig } from "@/stores/use-config-store";
-
-const resolutionOptions = [
-    { value: "720", label: "720p" },
-    { value: "480", label: "480p" },
-];
-
-const grokResolutionOptions = [
-    { value: "480", label: "480p" },
-    { value: "720", label: "720p" },
-    { value: "1080", label: "1080p" },
-];
-
-const grokResolutionValues = new Set(grokResolutionOptions.map((item) => item.value));
+import { modelCapabilities } from "@/lib/model-capabilities";
+import { boolConfig, type AiConfig } from "@/stores/use-config-store";
 
 const sizeOptions = [
     { value: "1280x720", labelKey: "landscape", width: 1280, height: 720 },
@@ -29,12 +17,11 @@ const sizeOptions = [
     { value: "auto", labelKey: "auto", width: 0, height: 0 },
 ];
 
-const secondOptions = [6, 10, 12, 16, 20];
-const grokSecondOptions = [6, 10, 15];
+const grokCaps = modelCapabilities("grok-imagine-video-1.5");
 
-export const videoResolutionOptions = grokResolutionOptions.map((item) => ({ value: item.value, label: item.label }));
+export const videoResolutionOptions = grokCaps.videoResolutions.map((value) => ({ value, label: `${value}p` }));
 export const videoSizeOptions = sizeOptions.map((item) => ({ value: item.value, get label() { return i18n.t(`settingsPanels.video.sizes.${item.labelKey}`); } }));
-export const videoSecondOptions = grokSecondOptions.map((value) => String(value));
+export const videoSecondOptions = grokCaps.videoSeconds.map((value) => String(value));
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
@@ -46,9 +33,9 @@ type VideoSettingsPanelProps = {
 
 export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
     const { t } = useTranslation();
-    const grokVideo = isGrokImagineVideoModel(config.model || config.videoModel);
-    const visibleResolutions = grokVideo ? grokResolutionOptions : resolutionOptions;
-    const visibleSeconds = grokVideo ? grokSecondOptions : secondOptions;
+    const caps = modelCapabilities(config.model || config.videoModel);
+    const visibleResolutions = caps.videoResolutions.map((value) => ({ value, label: `${value}p` }));
+    const visibleSeconds = caps.videoSeconds;
     const seconds = config.videoSeconds || "6";
     const size = normalizeVideoSizeValue(config.size);
     const dimensions = readSizeDimensions(size);
@@ -60,11 +47,12 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
     };
 
     useEffect(() => {
-        if (!grokVideo) return;
-        if (!grokResolutionValues.has(resolution)) onConfigChange("vquality", "720");
+        if (caps.videoResolutions.length && !caps.videoResolutions.includes(resolution)) {
+            onConfigChange("vquality", caps.videoResolutions.includes("720") ? "720" : caps.videoResolutions[0]);
+        }
         const secondsValue = Math.floor(Number(seconds) || 6);
-        if (secondsValue > 15) onConfigChange("videoSeconds", "15");
-    }, [grokVideo, onConfigChange, resolution, seconds]);
+        if (secondsValue > caps.videoSecondsMax) onConfigChange("videoSeconds", String(caps.videoSecondsMax));
+    }, [caps.videoResolutions, caps.videoSecondsMax, onConfigChange, resolution, seconds]);
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -77,17 +65,17 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                 {item.label}
                             </OptionPill>
                         ))}
-                        {grokVideo ? null : <ResolutionInput value={resolution} theme={theme} onChange={(value) => onConfigChange("vquality", value)} />}
+                        {caps.videoResolutionCustom ? <ResolutionInput value={resolution} theme={theme} onChange={(value) => onConfigChange("vquality", value)} /> : null}
                     </div>
                 </SettingGroup>
                 <SettingGroup title={t("settingsPanels.video.size")} color={theme.node.muted}>
-                    {grokVideo ? null : (
+                    {caps.videoCustomPixels ? (
                         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
                             <DimensionInput prefix="W" value={dimensions.width} disabled={size === "auto"} theme={theme} onChange={(value) => updateDimension("width", value)} />
                             <span className="text-lg opacity-45">↔</span>
                             <DimensionInput prefix="H" value={dimensions.height} disabled={size === "auto"} theme={theme} onChange={(value) => updateDimension("height", value)} />
                         </div>
-                    )}
+                    ) : null}
                     <div className="grid grid-cols-3 gap-2.5">
                         {sizeOptions.map((item) => (
                             <button
@@ -100,11 +88,11 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                             >
                                 <SizePreview width={item.width} height={item.height} color={theme.node.text} />
                                 <span>{t(`settingsPanels.video.sizes.${item.labelKey}`)}</span>
-                                {grokVideo || item.value === "auto" ? null : (
+                                {caps.videoCustomPixels && item.value !== "auto" ? (
                                     <span className="text-[11px] leading-none opacity-55">
                                         {item.value}
                                     </span>
-                                )}
+                                ) : null}
                             </button>
                         ))}
                     </div>
@@ -116,10 +104,10 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                 {value}s
                             </OptionPill>
                         ))}
-                        <NumberInput value={seconds} min={1} max={grokVideo ? 15 : 20} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                        <NumberInput value={seconds} min={1} max={caps.videoSecondsMax} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
                     </div>
                 </SettingGroup>
-                {grokVideo ? (
+                {caps.videoGenerateAudio ? (
                     <div className="flex items-center justify-between gap-3">
                         <div className="text-xs font-medium" style={{ color: theme.node.muted }}>
                             {t("settingsPanels.video.generateAudio")}
