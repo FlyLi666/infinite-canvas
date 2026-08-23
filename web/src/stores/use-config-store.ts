@@ -81,6 +81,28 @@ const YANLU_MANAGED_MODELS: ChannelModel[] = [
     { name: "gpt-5.6-luna", capability: "text" },
     { name: "gpt-5.6-terra", capability: "text" },
 ];
+const GROK_IMAGE_MODELS = new Set(["grok-imagine-image", "grok-imagine-image-quality", "grok-imagine-edit"]);
+const GROK_SIZE_FALLBACK: Record<string, string> = {
+    "16:9-4k": "2048x1152",
+    "9:16-4k": "1152x2048",
+    "3840x2160": "2048x1152",
+    "2160x3840": "1152x2048",
+};
+
+export function isGrokImagineImageModel(value: string) {
+    return GROK_IMAGE_MODELS.has(modelOptionName(value));
+}
+
+export function fallbackGrokImageSize(size: string) {
+    return GROK_SIZE_FALLBACK[size] || size;
+}
+
+export function grokImageModelPatch(model: string, size?: string) {
+    if (!isGrokImagineImageModel(model)) return { model };
+    const nextSize = fallbackGrokImageSize(size || "");
+    return nextSize === (size || "") ? { model } : { model, size: nextSize };
+}
+
 const MODEL_CATALOG_KEYS: Record<string, string> = {
     "gpt-image-2": "gptImage2",
     "grok-imagine-image": "grokImagineImage",
@@ -224,12 +246,13 @@ export const useConfigStore = create<ConfigStore>()(
             configTab: "channels",
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
-                set((state) => ({
-                    config: {
-                        ...state.config,
-                        [key]: value,
-                    },
-                })),
+                set((state) => {
+                    const config = { ...state.config, [key]: value };
+                    if ((key === "imageModel" || key === "model") && isGrokImagineImageModel(String(value))) {
+                        config.size = fallbackGrokImageSize(config.size);
+                    }
+                    return { config };
+                }),
             updateWebdavConfig: (key, value) =>
                 set((state) => ({
                     webdav: {

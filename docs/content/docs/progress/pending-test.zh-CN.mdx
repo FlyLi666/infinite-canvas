@@ -5,13 +5,13 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
-- 模型显示名：登录后生图下拉主文案应为「GPT 生图 2 / Grok 生图 / Grok 高质量图 / Grok 改图（研路AI）」，并带一句能力说明；视频为「Grok 视频 1.5」；文本为 Sol / Luna / Terra。下拉值与请求仍是 `gpt-image-2`、`grok-imagine-image`、`grok-imagine-image-quality`、`grok-imagine-edit`、`grok-imagine-video-1.5`、`gpt-5.6-sol` 等技术名。切到 English 后显示对应英文名。
+- 模型显示名：登录后生图下拉主文案应为「GPT-image-2（生图/改图） / GROK-快速（不能改图） / GROK-高质量（不能改图） / GROK-改图专用（研路AI）」，并带一句能力说明；视频为「Grok 视频 1.5」；文本为 Sol / Luna / Terra。下拉值与请求仍是技术名。切到 English 后显示 GPT-image-2 (Create/Edit)、GROK Fast (No Editing) 等。选中任一 Grok 生图/改图模型时，尺寸面板不应再出现 `16:9(4k)` / `9:16(4k)`；若先前选了 4K 再切到 Grok，应回落到同比例 2K。gpt-image-2 仍可看到 4K。
 
 - 顶栏版本：首页和画布顶栏不再出现版本号，点击也不应打开「版本更新」弹窗；页面加载时不应再请求上游仓库的 VERSION / CHANGELOG。
 
 - 登录后新画布默认模型：清站点存储后登录，再进入新画布。文本/生图/视频默认必须是 `yanlu::gpt-5.6-sol`、`yanlu::gpt-image-2`、`yanlu::grok-imagine-video-1.5`，渠道为托管，不能落到无钥匙的 `default::`。直接点生成应开始请求，不得弹出配置窗。未登录的本地用户仍维持原来的 `default::` 占位。
 
-- 登录后新建生成节点：在画布上新建生成配置节点时，下拉应立刻显示研路AI模型（如「GPT 生图 2（研路AI）」），不能是「默认渠道 / gpt-5.5」。切到文本应显示「Sol（研路AI）」。直接点生成应开始请求、不弹配置；不必先打开再关闭配置窗才能把下拉纠正过来。
+- 登录后新建生成节点：在画布上新建生成配置节点时，下拉应立刻显示研路AI模型（如「GPT-image-2（生图/改图）（研路AI）」），不能是「默认渠道 / gpt-5.5」。切到文本应显示「Sol（研路AI）」。直接点生成应开始请求、不弹配置；不必先打开再关闭配置窗才能把下拉纠正过来。
 
 - 近节点生成后顶栏余额：分别用 Grok 生图、Grok 视频、文本走 `/__rigel-ai/chat` 各生成一次。请求结束（成功或失败）后，顶栏美元余额应马上变成服务端新余额，不用等窗口重新聚焦。GPT Image 2 出图结束后仍应刷新。
 
@@ -21,7 +21,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 - 亚洲近节点生成：本版起 Grok 生图 / 改图 / 视频和文本应离开中转站、直达亚洲近节点。用户可感知点：Grok 与文本应比之前绕门户更快；余额只够出 1K 小图时应能正常生成，不再被旧的一口价预扣拦住；失败提示仍是原来的人话原因，不要换成新的技术堆栈。登录/充值仍走中转站，扣的还是同一把研路密钥与余额。
 
-- 研路AI托管渠道模型：登录后生图下拉应出现 GPT 生图 2（`gpt-image-2`）、Grok 生图（`grok-imagine-image`）、Grok 高质量图（`grok-imagine-image-quality`）、Grok 改图（`grok-imagine-edit`）；视频下拉应出现 Grok 视频 1.5（`grok-imagine-video-1.5`）；文本下拉应出现 Sol（`gpt-5.6-sol`）、Luna（`gpt-5.6-luna`）、Terra（`gpt-5.6-terra`）。默认生图仍为 gpt-image-2，默认视频切到 grok-imagine-video-1.5，默认文本切到 gpt-5.6-sol。GPT 生图仍走异步排队，并由研路自有账号出图（大约 20–30 秒，不应再走之前较慢的备胎）；Grok 生图、编辑和视频、以及文本应走亚洲近节点生成入口，登录/充值仍走中转站，扣的还是同一把研路密钥与余额。画布已下线语音/TTS：工具栏、生成配置和设置中不再出现音频模型与音频生成入口；视频「生成声音」开关仍可用，拖入 MP3/WAV 仍可作为视频参考。主页和画布顶栏不再显示 GitHub 图标或 Agent 连接按钮，进入画布也不再自动打开 Agent 面板。
+- 研路AI托管渠道模型：登录后生图下拉应出现 GPT-image-2（生图/改图）（`gpt-image-2`）、GROK-快速（不能改图）（`grok-imagine-image`）、GROK-高质量（不能改图）（`grok-imagine-image-quality`）、GROK-改图专用（`grok-imagine-edit`）；视频下拉应出现 Grok 视频 1.5（`grok-imagine-video-1.5`）；文本下拉应出现 Sol（`gpt-5.6-sol`）、Luna（`gpt-5.6-luna`）、Terra（`gpt-5.6-terra`）。默认生图仍为 gpt-image-2，默认视频切到 grok-imagine-video-1.5，默认文本切到 gpt-5.6-sol。GPT 生图仍走异步排队，并由研路自有账号出图（大约 20–30 秒，不应再走之前较慢的备胎）；Grok 生图、编辑和视频、以及文本应走亚洲近节点生成入口，登录/充值仍走中转站，扣的还是同一把研路密钥与余额。画布已下线语音/TTS：工具栏、生成配置和设置中不再出现音频模型与音频生成入口；视频「生成声音」开关仍可用，拖入 MP3/WAV 仍可作为视频参考。主页和画布顶栏不再显示 GitHub 图标或 Agent 连接按钮，进入画布也不再自动打开 Agent 面板。
 
 - 登录后托管渠道：localStorage 里只能有一份 `id=yanlu`，图钥匙和 `textApiKey` 都在这一份上。文本和 Grok 视频应能直接生成，不再弹「配置未就绪」或报 `Invalid API key`。视频下拉与默认必须是 `grok-imagine-video-1.5`，不能出现 `1.5-preview`。新建画布生图/配置节点默认 1 张。失败应显示中文：密钥无效请重新登录、余额不足请充值、当前不能使用该模型、服务暂时不可用；配置未就绪时先给出可见提示再打开配置。
 

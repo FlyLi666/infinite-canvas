@@ -1,10 +1,10 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { ConfigProvider, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import type { AiConfig } from "@/stores/use-config-store";
+import { fallbackGrokImageSize, isGrokImagineImageModel, type AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
     { value: "auto", labelKey: "auto" },
@@ -49,8 +49,16 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const quality = config.quality || "auto";
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
+    const hideGrok4k = isGrokImagineImageModel(config.model || config.imageModel);
+    const visibleAspects = hideGrok4k ? aspectOptions.filter((item) => !item.value.endsWith("-4k")) : aspectOptions;
     const transparentBackground = config.background === "transparent";
-    const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize);
+    const selectedAspect = visibleAspects.find((item) => (item.size || item.value) === activeSize || item.value === activeSize) || visibleAspects[0];
+
+    useEffect(() => {
+        if (!hideGrok4k) return;
+        const next = fallbackGrokImageSize(activeSize);
+        if (next !== activeSize) onConfigChange("size", next);
+    }, [activeSize, hideGrok4k, onConfigChange]);
     const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
     const selectAspect = (value: string) => {
         const option = aspectOptions.find((item) => item.value === value);
@@ -106,7 +114,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.aspectRatio")}</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {aspectOptions.map((item) => (
+                        {visibleAspects.map((item) => (
                             <button
                                 key={item.value}
                                 type="button"
