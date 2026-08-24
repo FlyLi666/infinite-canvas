@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Group, Video } from "lucide-react";
-import { saveAs } from "file-saver";
+import { useDownloadFile } from "@/hooks/use-download-file";
 import { useTranslation } from "react-i18next";
 
 import { humanizeGenerationError } from "@/lib/generation-errors";
@@ -140,6 +140,7 @@ export default function CanvasPage() {
 function InfiniteCanvasPage() {
     const { message, modal } = App.useApp();
     const { t } = useTranslation();
+    const downloadFile = useDownloadFile();
     // Subscribe to the registry version so plugin registration changes rerender the canvas.
     const nodeRegistryVersion = useNodeRegistryVersion((state) => state.version);
     const params = useParams<{ id: string }>();
@@ -1519,14 +1520,15 @@ function InfiniteCanvasPage() {
 
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {
         if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
-        saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
-    }, []);
+        const ext = node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content);
+        void downloadFile({ url: node.metadata.content, storageKey: node.metadata.storageKey }, `canvas-${node.type}-${node.id}.${ext}`);
+    }, [downloadFile]);
 
     const downloadBatchImage = useCallback((node: CanvasNodeData, imageId: string) => {
         const image = node.metadata?.images?.find((item) => item.id === imageId);
         if (!image?.content) return;
-        saveAs(image.content, `canvas-image-${node.id}-${image.id}.${imageExtension(image.content)}`);
-    }, []);
+        void downloadFile({ url: image.content, storageKey: image.storageKey }, `canvas-image-${node.id}-${image.id}.${imageExtension(image.content)}`);
+    }, [downloadFile]);
 
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {

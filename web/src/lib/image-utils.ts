@@ -52,7 +52,7 @@ export function readImageMeta(dataUrl: string) {
         };
         image.onload = done;
         image.onerror = done;
-        setTimeout(done, 3000);
+        setTimeout(done, /^https?:/i.test(dataUrl) ? 12_000 : 3_000);
         image.src = dataUrl;
     });
 }

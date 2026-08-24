@@ -603,14 +603,26 @@ function EmptyImageContent({ theme }: NodeContentRendererProps) {
 
 function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
     const { t } = useTranslation();
-    if (!node.metadata?.content)
+    const src = node.metadata?.content || "";
+    const [failed, setFailed] = useState(false);
+    if (!src)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
                 <Video className="size-7 opacity-35" />
                 <span className="text-sm">{t("canvas.node.emptyVideo")}</span>
             </div>
         );
-    return <video src={node.metadata.content} controls className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
+    if (failed)
+        return (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-4 text-center" style={{ color: theme.node.text }}>
+                <Video className="size-7 opacity-35" />
+                <span className="text-sm">{t("canvas.node.videoUnplayable")}</span>
+                <button type="button" className="rounded-lg px-2 py-1 text-xs hover:bg-black/5 dark:hover:bg-white/10" onClick={() => window.open(src, "_blank", "noopener,noreferrer")}>
+                    {t("canvas.node.openVideo")}
+                </button>
+            </div>
+        );
+    return <video key={src} src={src} controls playsInline preload="metadata" className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom onError={() => setFailed(true)} />;
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {

@@ -1,12 +1,18 @@
 import localforage from "localforage";
 import { nanoid } from "nanoid";
 
+import i18n from "@/i18n";
+import { isBrowserReachableMediaUrl } from "@/lib/reachable-media";
+
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
 
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
 const objectUrls = new Map<string, string>();
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
+    if (typeof input === "string" && /^https?:/i.test(input) && !isBrowserReachableMediaUrl(input)) {
+        throw new Error(i18n.t("apiErrors.mediaUnreachable"));
+    }
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
     const storageKey = `${prefix}:${nanoid()}`;
     await store.setItem(storageKey, blob);

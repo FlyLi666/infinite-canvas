@@ -3,6 +3,7 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 import i18n from "@/i18n";
 import { readImageMeta } from "@/lib/image-utils";
+import { isBrowserReachableMediaUrl } from "@/lib/reachable-media";
 
 export type UploadedImage = {
     url: string;
@@ -20,12 +21,16 @@ const objectUrls = new Map<string, string>();
 
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
     if (typeof input === "string") {
+        if (/^https?:/i.test(input) && !isBrowserReachableMediaUrl(input)) {
+            throw new Error(i18n.t("apiErrors.mediaUnreachable"));
+        }
         try {
             return persistImageBlob(await (await fetch(input)).blob());
         } catch (error) {
             if (!/^https?:/i.test(input)) throw error;
             const meta = await readImageMeta(input).catch(() => ({ width: 0, height: 0, mimeType: "image/png" }));
-            return { url: input, storageKey: `image:${nanoid()}`, width: meta.width || 0, height: meta.height || 0, bytes: 0, mimeType: meta.mimeType || "image/png" };
+            // 境内可打开的回链拉不下来就不要造空 storageKey：没有 blob 的钥匙会让后续 hydrate 以为图在本地。
+            return { url: input, storageKey: "", width: meta.width || 0, height: meta.height || 0, bytes: 0, mimeType: meta.mimeType || "image/png" };
         }
     }
     return persistImageBlob(input);

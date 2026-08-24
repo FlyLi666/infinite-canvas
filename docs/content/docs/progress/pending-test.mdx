@@ -19,7 +19,11 @@ The current release needs manual verification in these areas:
 
 - Image-tab model picker: after switching a config node from Video back to Image, the dropdown must list only image models immediately (no leftover Grok Video / Seedance labels).
 
-- Image generation now requests `response_format=url` instead of a large `b64_json` body. A 1K Grok / Image 2.0 result should finish well under a minute on the workbench, then still appear in the result pane.
+- Image generation: GPT Image 2 still requests `response_format=url` and should land on a reachable `img.flyli.cn` (or local blob). Grok image requests `b64_json` so the picture bytes come through the Asia near-node; a foreign-only URL must not appear as a successful canvas/workbench image.
+
+- Grok image on canvas (the reported vanish): after generation the node must show the actual picture (local bytes), not shrink to a speck, snap back to “empty image”, or sit on an unopenable overseas link. GPT Image 2 on the same canvas must still work.
+
+- Grok video on canvas: the player must play from bytes streamed through the Asia near-node (`/videos/{id}/content`) and stored locally — not from an overseas host, and not from our own image bucket. If that hop also fails, show a human error — do not leave a black “successful” player. Download must not freeze the page. A local file still downloads; leftover remote-only URLs open a new tab. Ship this with the near-node change: CPA `/content` is 404, so the near-node must fetch the official URL and stream it back.
 
 - Image-to-image after the URL change: connect a Grok result node to a new/empty image node, prompt something like “add a monster”, GROK 2.0. The target should leave “Generating”, not stay empty with a stuck Stop button. GPT edit from an `img.flyli.cn` result should still upload the file as multipart.
 

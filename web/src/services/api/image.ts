@@ -3,6 +3,7 @@ import axios from "axios";
 import i18n from "@/i18n";
 import { humanizeGenerationError } from "@/lib/generation-errors";
 import { isYanluImageApiBaseUrl } from "@/lib/yanlu-endpoints";
+import { isBrowserReachableMediaUrl, mediaHostsFromBaseUrl } from "@/lib/reachable-media";
 import { clampImageCount, fallbackImageQualityForModel, grokImageGeometry, isGrokImagineImageModel, modelCapabilities } from "@/lib/model-capabilities";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, useConfigStore, YANLU_CHANNEL_ID, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { refreshYanluBalance, useAuthStore } from "@/stores/use-auth-store";
@@ -286,7 +287,12 @@ function resolveImageDataUrl(item: Record<string, unknown>) {
     return null;
 }
 
-function parseImagePayload(payload: ImageApiResponse) {
+function imageResponseFormat(model: string) {
+    // GPT 出图门会把图收到境内可打开的地址。Grok 回的是境外 CDN，境内打不开，字节必须走近节点 JSON。
+    return isGrokImagineImageModel(model) ? "b64_json" : "url";
+}
+
+function parseImagePayload(payload: ImageApiResponse, extraHosts: readonly string[] = []) {
     if (typeof payload.code === "number" && payload.code !== 0) {
         throw new Error(payload.msg || apiText("requestFailed"));
     }
@@ -298,15 +304,22 @@ function parseImagePayload(payload: ImageApiResponse) {
     const images =
         imageList
             .map(resolveImageDataUrl)
-            .filter((value): value is string => Boolean(value))
+            .filter((value): value is string => Boolean(value) && isBrowserReachableMediaUrl(value, extraHosts))
             .map((dataUrl) => ({ id: nanoid(), dataUrl }));
 
-    if (images.length === 0 && typeof payload.url === "string" && payload.url) {
+    if (images.length === 0 && typeof payload.b64_json === "string" && payload.b64_json) {
+        return [{ id: nanoid(), dataUrl: `data:image/png;base64,${payload.b64_json}` }];
+    }
+
+    if (images.length === 0 && typeof payload.url === "string" && payload.url && isBrowserReachableMediaUrl(payload.url, extraHosts)) {
         return [{ id: nanoid(), dataUrl: payload.url }];
     }
 
     if (images.length === 0) {
-        // Check whether the response contains data in an unrecognized format.
+        const hasForeignUrl =
+            (typeof payload.url === "string" && Boolean(payload.url)) ||
+            imageList.some((item) => typeof item.url === "string" && item.url);
+        if (hasForeignUrl) throw new Error(apiText("mediaUnreachable"));
         const rawKeys = Object.keys(payload).filter((k) => k !== "code" && k !== "msg" && k !== "error");
         throw new Error(rawKeys.length > 0
             ? apiText("unknownImageResponse", { fields: rawKeys.join(", ") })
@@ -323,9 +336,33 @@ function extractImageTaskId(payload: ImageApiResponse | undefined) {
     return id;
 }
 
+async function materializeImageResponse(config: AiConfig, status: number, payload: ImageApiResponse | undefined, options?: RequestOptions) {
+    const taskId = extractImageTaskId(payload);
+    if (isAsyncImageTask(status, payload)) {
+        notifyImageTaskAccepted(payload, options);
+        if (taskId) {
+            const fromContent = await fetchImageTaskContent(config, taskId, options);
+            if (fromContent) return fromContent;
+        }
+        return pollImageTask(config, taskId, options);
+    }
+    const extraHosts = mediaHostsFromBaseUrl(config.baseUrl);
+    try {
+        return parseImagePayload(payload || {}, extraHosts);
+    } catch (error) {
+        if (taskId) {
+            const fromContent = await fetchImageTaskContent(config, taskId, options);
+            if (fromContent) return fromContent;
+        }
+        throw error;
+    }
+}
+
 function isAsyncImageTask(status: number, payload: ImageApiResponse | undefined) {
     const taskId = extractImageTaskId(payload);
-    if (!taskId || payload?.data?.length || payload?.url || payload?.b64_json) return false;
+    if (!taskId || payload?.data?.length || payload?.b64_json) return false;
+    if (payload?.url && isBrowserReachableMediaUrl(payload.url)) return false;
+    if (payload?.url) return true;
     const taskStatus = String(payload?.status || "").toLowerCase();
     return status === 202 || IMAGE_TASK_WAIT.has(taskStatus);
 }
@@ -380,6 +417,7 @@ function usefulImageTaskMessage(payload: ImageApiResponse) {
 async function pollImageTask(config: AiConfig, taskId: string, options?: RequestOptions) {
     // 排队中的任务随队列推进不断续期；进入生成阶段后按单段超时兜底。
     let deadline = Date.now() + IMAGE_TASK_STAGE_TIMEOUT;
+    const extraHosts = mediaHostsFromBaseUrl(config.baseUrl);
     while (Date.now() < deadline) {
         await delay(2000, options?.signal);
         const response = await axios.get<ImageApiResponse>(aiApiUrl(config, `/images/tasks/${encodeURIComponent(taskId)}`), {
@@ -391,17 +429,33 @@ async function pollImageTask(config: AiConfig, taskId: string, options?: Request
         if (status === "failed") {
             throw imageTaskFailure(payload);
         }
-        if (typeof payload.url === "string" && payload.url) {
-            return [{ id: nanoid(), dataUrl: payload.url }];
-        }
         if (typeof payload.b64_json === "string" && payload.b64_json) {
             return [{ id: nanoid(), dataUrl: `data:image/png;base64,${payload.b64_json}` }];
         }
-        if (payload.data?.length) {
-            return parseImagePayload(payload);
+        if (typeof payload.url === "string" && payload.url && isBrowserReachableMediaUrl(payload.url, extraHosts)) {
+            return [{ id: nanoid(), dataUrl: payload.url }];
         }
-        if (status === "succeeded") {
-            throw new Error(apiText("noImageReturned"));
+        if (payload.data?.length) {
+            try {
+                return parseImagePayload(payload, extraHosts);
+            } catch (error) {
+                if (status !== "succeeded" && IMAGE_TASK_WAIT.has(status)) {
+                    notifyTaskUpdate({ status: status === "queued" ? "queued" : "pending", position: typeof payload.position === "number" ? payload.position : undefined }, options);
+                    continue;
+                }
+                const fromContent = await fetchImageTaskContent(config, taskId, options);
+                if (fromContent) return fromContent;
+                throw error;
+            }
+        }
+        const finished = status === "succeeded" || ((Boolean(payload.url) || Boolean(payload.b64_json)) && !status);
+        if (finished || (payload.url && !IMAGE_TASK_WAIT.has(status))) {
+            const fromContent = await fetchImageTaskContent(config, taskId, options);
+            if (fromContent) return fromContent;
+            if (payload.url && !isBrowserReachableMediaUrl(payload.url, extraHosts)) {
+                throw new Error(apiText("mediaUnreachable"));
+            }
+            if (status === "succeeded") throw new Error(apiText("noImageReturned"));
         }
         if (status === "queued") {
             deadline = Date.now() + IMAGE_TASK_STAGE_TIMEOUT;
@@ -411,6 +465,41 @@ async function pollImageTask(config: AiConfig, taskId: string, options?: Request
         }
     }
     throw new Error(apiText("requestFailed"));
+}
+
+async function fetchImageTaskContent(config: AiConfig, taskId: string, options?: RequestOptions) {
+    for (const path of [`/images/tasks/${encodeURIComponent(taskId)}/content`, `/images/${encodeURIComponent(taskId)}/content`]) {
+        try {
+            const response = await axios.get<Blob>(aiApiUrl(config, path), {
+                headers: aiHeaders(config),
+                responseType: "blob",
+                timeout: 120_000,
+                signal: options?.signal,
+                validateStatus: (status) => status >= 200 && status < 300,
+            });
+            if (!isImageBlob(response.data)) continue;
+            return [{ id: nanoid(), dataUrl: await blobToDataUrl(response.data) }];
+        } catch (error) {
+            if (axios.isCancel(error) || options?.signal?.aborted) throw error;
+        }
+    }
+    return null;
+}
+
+function isImageBlob(blob: Blob) {
+    const type = (blob.type || "").toLowerCase();
+    if (type.startsWith("image/")) return blob.size > 32;
+    if (type === "application/octet-stream" || !type) return blob.size > 1024;
+    return false;
+}
+
+function blobToDataUrl(blob: Blob) {
+    return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error(apiText("noImageReturned")));
+        reader.readAsDataURL(blob);
+    });
 }
 
 function notifyImageTaskAccepted(payload: ImageApiResponse | undefined, options?: RequestOptions) {
@@ -987,7 +1076,7 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
                                 ...(quality ? { quality } : {}),
                                 ...(grokGeometry ? grokGeometry : requestSize ? { size: requestSize } : {}),
                                 ...(background ? { background } : {}),
-                                response_format: "url",
+                                response_format: imageResponseFormat(activeConfig.model),
                                 output_format: IMAGE_OUTPUT_FORMAT,
                             },
                             {
@@ -998,11 +1087,7 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
                         ),
                     options,
                 );
-                if (isAsyncImageTask(response.status, response.data)) {
-                    notifyImageTaskAccepted(response.data, options);
-                    return pollImageTask(activeConfig, extractImageTaskId(response.data), options);
-                }
-                return parseImagePayload(response.data);
+                return materializeImageResponse(activeConfig, response.status, response.data, options);
             },
             options,
         );
@@ -1042,7 +1127,7 @@ async function buildGrokEditPayload(
         model,
         prompt,
         n,
-        response_format: "url",
+        response_format: imageResponseFormat(model),
         output_format: IMAGE_OUTPUT_FORMAT,
         image,
         ...(mask ? { mask: { url: await resolveEditImageUrl(mask), type: "image_url" } } : {}),
@@ -1144,11 +1229,7 @@ async function requestEditInner(config: AiConfig, prompt: string, references: Re
                         }),
                     options,
                 );
-                if (isAsyncImageTask(response.status, response.data)) {
-                    notifyImageTaskAccepted(response.data, options);
-                    return pollImageTask(activeConfig, extractImageTaskId(response.data), options);
-                }
-                return parseImagePayload(response.data);
+                return materializeImageResponse(activeConfig, response.status, response.data, options);
             },
             options,
         );

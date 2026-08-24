@@ -2,8 +2,9 @@ import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download,
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
-import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
+
+import { useDownloadFile } from "@/hooks/use-download-file";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
@@ -74,6 +75,7 @@ const logStore = localforage.createInstance({ name: "infinite-canvas", storeName
 export default function ImagePage() {
     const { message } = App.useApp();
     const { t } = useTranslation();
+    const downloadFile = useDownloadFile();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const dragDepthRef = useRef(0);
     const config = useConfigStore((state) => state.config);
@@ -239,7 +241,7 @@ export default function ImagePage() {
     }, [autoRunToken]);
 
     const downloadImage = (image: GeneratedImage, index: number) => {
-        saveAs(image.dataUrl, `image-${index + 1}.png`);
+        void downloadFile({ url: image.dataUrl, storageKey: image.storageKey }, `image-${index + 1}.png`);
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {

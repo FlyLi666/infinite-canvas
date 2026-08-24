@@ -3,8 +3,9 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
-import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
+
+import { useDownloadFile } from "@/hooks/use-download-file";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
@@ -71,6 +72,7 @@ const logStore = localforage.createInstance({ name: "infinite-canvas", storeName
 export default function VideoPage() {
     const { message } = App.useApp();
     const { t } = useTranslation();
+    const downloadFile = useDownloadFile();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const dragDepthRef = useRef(0);
     const activeLogIdsRef = useRef<Set<string>>(new Set());
@@ -239,7 +241,7 @@ export default function VideoPage() {
     };
 
     const downloadVideo = (video: GeneratedVideo) => {
-        saveAs(video.url, "video.mp4");
+        void downloadFile({ url: video.url, storageKey: video.storageKey }, "video.mp4");
     };
 
     const saveResultToAssets = (video: GeneratedVideo) => {

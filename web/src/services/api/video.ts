@@ -8,6 +8,7 @@ import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { refreshYanluBalance } from "@/stores/use-auth-store";
 import { grokVideoAspectRatio, modelCapabilities } from "@/lib/model-capabilities";
+import { isBrowserReachableMediaUrl, mediaHostsFromBaseUrl } from "@/lib/reachable-media";
 import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
 import type { ReferenceImage } from "@/types/image";
@@ -132,6 +133,7 @@ function videoPluginResult(result: unknown): VideoGenerationResult {
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
     if (result.blob) return uploadMediaFile(result.blob, "video");
     if (result.url) {
+        if (!isBrowserReachableMediaUrl(result.url)) throw new Error(apiText("mediaUnreachable"));
         try {
             return await uploadMediaFile(result.url, "video");
         } catch {
@@ -175,16 +177,7 @@ async function createGrokVideoTask(config: AiConfig, model: string, prompt: stri
 async function pollGrokVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
         const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
-        const url = videoResultUrl(video);
-        if (url) return { status: "completed", result: await videoResultFromUrl(url, options) };
-        const status = (video.status || "").toLowerCase();
-        if (status === "done" || status === "completed" || status === "succeeded" || status === "success") {
-            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
-            await assertVideoBlob(content.data);
-            return { status: "completed", result: { blob: content.data } };
-        }
-        if (status === "failed" || status === "cancelled" || status === "expired") return { status: "failed", error: readApiErrorMessage(video.error?.message) || apiText("videoGenerationFailed") };
-        return { status: "pending" };
+        return await completeVideoFromTask(config, task, video, options);
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("videoTaskQueryFailed")));
     }
@@ -212,23 +205,58 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
 async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
         const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
-        const url = videoResultUrl(video);
-        if (url) return { status: "completed", result: await videoResultFromUrl(url, options) };
-        if (video.status === "completed") {
-            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
-            await assertVideoBlob(content.data);
-            return { status: "completed", result: { blob: content.data } };
-        }
-        if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: readApiErrorMessage(video.error?.message) || apiText("videoGenerationFailed") };
-        return { status: "pending" };
+        return await completeVideoFromTask(config, task, video, options);
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("videoTaskQueryFailed")));
     }
 }
 
-async function videoResultFromUrl(url: string, options?: RequestOptions): Promise<VideoGenerationResult> {
+async function completeVideoFromTask(config: AiConfig, task: VideoGenerationTask, video: VideoResponse, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    const extraHosts = mediaHostsFromBaseUrl(config.baseUrl);
+    const url = videoResultUrl(video);
+    const status = (video.status || "").toLowerCase();
+    if (status === "failed" || status === "cancelled" || status === "expired") {
+        return { status: "failed", error: readApiErrorMessage(video.error?.message) || apiText("videoGenerationFailed") };
+    }
+    const done = status === "done" || status === "completed" || status === "succeeded" || status === "success";
+    const finished = done || (Boolean(url) && !status);
+    const reachable = Boolean(url && isBrowserReachableMediaUrl(url, extraHosts));
+
+    if (url || finished) {
+        const blob = await fetchVideoContent(config, task.id, options);
+        if (blob) return { status: "completed", result: { blob } };
+    }
+
+    if (reachable && url) {
+        const result = await videoResultFromUrl(url, extraHosts, options);
+        if (result.blob) return { status: "completed", result };
+        return { status: "completed", result: { url, mimeType: "video/mp4" } };
+    }
+    if (finished) return { status: "failed", error: apiText("mediaUnreachable") };
+    return { status: "pending" };
+}
+
+async function fetchVideoContent(config: AiConfig, taskId: string, options?: RequestOptions) {
     try {
-        const response = await axios.get<Blob>(url, { responseType: "blob", signal: options?.signal });
+        const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${encodeURIComponent(taskId)}/content`), {
+            headers: aiHeaders(config),
+            responseType: "blob",
+            timeout: 180_000,
+            signal: options?.signal,
+            validateStatus: (status) => status >= 200 && status < 300,
+        });
+        await assertVideoBlob(content.data);
+        return content.data;
+    } catch (error) {
+        if (axios.isCancel(error) || options?.signal?.aborted) throw error;
+        return null;
+    }
+}
+
+async function videoResultFromUrl(url: string, extraHosts: readonly string[], options?: RequestOptions): Promise<VideoGenerationResult> {
+    if (!isBrowserReachableMediaUrl(url, extraHosts)) return {};
+    try {
+        const response = await axios.get<Blob>(url, { responseType: "blob", timeout: 60_000, signal: options?.signal });
         await assertVideoBlob(response.data);
         return { blob: response.data };
     } catch (error) {
@@ -328,15 +356,30 @@ function statusMessage(status: number | undefined, fallback: string) {
 }
 
 async function assertVideoBlob(blob: Blob) {
-    if (!blob.type.includes("json")) return;
-    let payload: { code?: number; msg?: string; error?: { message?: string } };
-    try {
-        payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
-    } catch {
-        return;
+    if (blob.size < 1024) throw new Error(apiText("videoDownloadFailed"));
+    const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+    const prefix = new TextDecoder().decode(head).trimStart();
+    if (prefix.startsWith("{") || prefix.startsWith("[") || prefix.startsWith("<")) {
+        try {
+            const payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
+            if (typeof payload.code === "number" && payload.code !== 0) throw new Error(readApiErrorMessage(payload) || apiText("videoDownloadFailed"));
+            if (payload.error?.message) throw new Error(readApiErrorMessage(payload.error.message) || payload.error.message);
+        } catch (error) {
+            if (error instanceof Error && error.message !== apiText("videoDownloadFailed")) throw error;
+        }
+        throw new Error(apiText("videoDownloadFailed"));
     }
-    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(readApiErrorMessage(payload) || apiText("videoDownloadFailed"));
-    if (payload.error?.message) throw new Error(readApiErrorMessage(payload.error.message) || payload.error.message);
+    if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) throw new Error(apiText("videoDownloadFailed"));
+    if (looksLikeVideoMagic(head)) return;
+    const type = (blob.type || "").toLowerCase();
+    if (type.startsWith("video/") || type.includes("mp4")) return;
+    throw new Error(apiText("videoDownloadFailed"));
+}
+
+function looksLikeVideoMagic(head: Uint8Array) {
+    const ftyp = head.length >= 8 && String.fromCharCode(head[4], head[5], head[6], head[7]) === "ftyp";
+    const webm = head.length >= 4 && head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3;
+    return ftyp || webm;
 }
 
 function isPublicMediaUrl(value: string) {
