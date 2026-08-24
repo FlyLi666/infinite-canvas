@@ -7,7 +7,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { refreshYanluBalance } from "@/stores/use-auth-store";
-import { grokVideoAspectRatio, modelCapabilities } from "@/lib/model-capabilities";
+import { grokVideoRequestAspectRatio, modelCapabilities } from "@/lib/model-capabilities";
 import { isBrowserReachableMediaUrl, mediaHostsFromBaseUrl } from "@/lib/reachable-media";
 import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
@@ -155,14 +155,15 @@ function normalizeGrokVideoResolution(value: string, model: string) {
 
 async function createGrokVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
     const caps = modelCapabilities(model);
+    const aspectRatio = grokVideoRequestAspectRatio(config.size, Boolean(references[0]));
     const body: Record<string, unknown> = {
         model: modelOptionName(model),
         prompt,
         duration: Number(normalizeVideoSeconds(config.videoSeconds, caps.videoSecondsMax, caps.videoSecondsMin)),
         resolution: normalizeGrokVideoResolution(config.vquality, model),
-        aspect_ratio: grokVideoAspectRatio(config.size),
         generate_audio: boolConfig(config.videoGenerateAudio, caps.videoGenerateAudio),
     };
+    if (aspectRatio) body.aspect_ratio = aspectRatio;
     if (references[0]) body.image = { url: await imageToDataUrl(references[0]) };
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos/generations"), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);

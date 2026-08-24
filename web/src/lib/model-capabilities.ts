@@ -264,6 +264,11 @@ export function grokVideoAspectRatio(size: string) {
     });
 }
 
+/** I2V: omit aspect_ratio so xAI keeps the source image ratio. Sending it stretches. T2V still sends the user ratio. */
+export function grokVideoRequestAspectRatio(size: string, hasReferenceImage: boolean) {
+    return hasReferenceImage ? undefined : grokVideoAspectRatio(size);
+}
+
 const GROK_IMAGE_2K_PIXELS = new Set(["2048x2048", "2048x1152", "1152x2048"]);
 
 /** xAI/CPA only honor aspect_ratio + resolution. Do not send pixel `size`. */

@@ -37,7 +37,11 @@ The current release needs manual verification in these areas:
 
 - Capability matrix / transparent background: Grok image, high-quality image, and edit must **hide** the transparent-background switch; GPT-image-2 still shows it. All other parameter behavior stays as in v0.17.4: GPT keeps base ratios only, Grok image hides 4K, Grok video keeps the three resolutions and 1–15s, Grok images omit `quality` and cap `n` at 10.
 
-- Grok video params: on canvas and the video workbench, Grok quality pills should read **低 / 中 / 高** (still 480 / 720 / 1080 under the hood). Duration options are 6 / 10 / 15 (or 1–15). Requests must send `resolution`, `aspect_ratio` (`16:9` etc., never pixel `size`), and `generate_audio`. Retail is **$0.6 / $0.8 / $1.5 per second**. Seedance quality pills also read **低 / 中 / 高**. A 1080p delivery around 1920×1088 is expected 16-alignment.
+- Grok / Seedance image-to-video flatten: with a reference image, the request must send `image.url` and **omit** `aspect_ratio` (official stretch). The video node frame must follow the source image ratio while generating — do not start as 16:9 and then squash. Text-to-video (no reference) still sends the user-selected `aspect_ratio`. Never send pixel `size`.
+
+- Text-attached image-to-video: Image → Text → empty Video. Generating from the text node should already include the first image. Generating from the empty video node must also send `image` (first frame), not fall back to text-to-video.
+
+- Grok video params: on canvas and the video workbench, Grok quality pills should read **低 / 中 / 高** (still 480 / 720 / 1080 under the hood). Duration options are 6 / 10 / 15 (or 1–15). Requests must send `resolution` and `generate_audio`. Text-to-video also sends `aspect_ratio` (`16:9` etc., never pixel `size`); image-to-video must omit `aspect_ratio`. Retail is **$0.6 / $0.8 / $1.5 per second**. Seedance quality pills also read **低 / 中 / 高**. A 1080p delivery around 1920×1088 is expected 16-alignment.
 
 - Grok images: Fast / High Quality / Edit must not send `quality`; Image 2.0 sends `low` or `medium`. `n` is capped at 10. GPT Image 2 still shows quality and count controls.
 

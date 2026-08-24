@@ -117,6 +117,10 @@ type CanvasGenerationRequest = {
 
 const VIDEO_NODE_MAX_WIDTH = 420;
 const VIDEO_NODE_MAX_HEIGHT = 420;
+
+function videoBoxFromImagePixels(width: number | undefined, height: number | undefined, fallback: { width: number; height: number }) {
+    return width && height ? fitNodeSize(width, height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT) : fallback;
+}
 // Stable empty reference array prevents `... || []` from invalidating CanvasNode's React.memo on every render.
 const EMPTY_REFERENCES: CanvasResourceReference[] = [];
 const CONNECTION_HANDLE_HIT_RADIUS = 40;
@@ -482,12 +486,27 @@ function InfiniteCanvasPage() {
             }
             const { fromNodeId, toNodeId } = connection;
             const exists = connectionsRef.current.some((conn) => conn.fromNodeId === fromNodeId && conn.toNodeId === toNodeId);
+            const nextConnections = exists ? connectionsRef.current : [...connectionsRef.current, { id: `conn-${Date.now()}`, fromNodeId, toNodeId }];
             if (!exists) {
                 setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, fromNodeId, toNodeId }]);
             }
             const fromNode = nodesRef.current.find((node) => node.id === fromNodeId);
-            if (fromNode?.type === CanvasNodeType.Image && fromNode.metadata?.content) {
-                setNodes((prev) => prev.map((node) => (node.id === toNodeId ? applyUpstreamImageEditModel(node, effectiveConfig) : node)));
+            const toNode = nodesRef.current.find((node) => node.id === toNodeId);
+            const i2vImage = buildNodeGenerationInputs(toNodeId, nodesRef.current, nextConnections, { followTextImages: true }).find((input) => input.image);
+            const i2vNode = i2vImage ? nodesRef.current.find((node) => node.id === i2vImage.nodeId) : undefined;
+            const patchEditModel = Boolean(fromNode?.type === CanvasNodeType.Image && fromNode.metadata?.content);
+            const resizeEmptyVideo = Boolean(toNode?.type === CanvasNodeType.Video && !toNode.metadata?.content && i2vNode);
+            if (patchEditModel || resizeEmptyVideo) {
+                setNodes((prev) =>
+                    prev.map((node) => {
+                        let next = patchEditModel && node.id === toNodeId ? applyUpstreamImageEditModel(node, effectiveConfig) : node;
+                        if (resizeEmptyVideo && next.id === toNodeId && i2vNode) {
+                            const size = videoBoxFromImagePixels(i2vNode.metadata?.naturalWidth, i2vNode.metadata?.naturalHeight, next);
+                            next = { ...next, ...size, position: { x: next.position.x + next.width / 2 - size.width / 2, y: next.position.y + next.height / 2 - size.height / 2 } };
+                        }
+                        return next;
+                    }),
+                );
             }
             setContextMenu(null);
         },
@@ -500,7 +519,13 @@ function InfiniteCanvasPage() {
             const sourceIsImage = source?.type === CanvasNodeType.Image && Boolean(source.metadata?.content);
             const imageModel = sourceIsImage ? preferredImageEditModel(resolveModelForCapability(effectiveConfig, undefined, "image")) : resolveModelForCapability(effectiveConfig, undefined, "image");
             const metadata = type === CanvasNodeType.Config ? { model: imageModel, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
-            const newNode = createCanvasNode(type, placeNewNodeCenter(type, pending.position, nodesRef.current), metadata);
+            let newNode = createCanvasNode(type, placeNewNodeCenter(type, pending.position, nodesRef.current), metadata);
+            if (type === CanvasNodeType.Video && source) {
+                const i2vId = sourceIsImage ? source.id : buildNodeGenerationInputs(source.id, nodesRef.current, connectionsRef.current, { followTextImages: true }).find((input) => input.image)?.nodeId;
+                const i2vNode = i2vId ? nodesRef.current.find((node) => node.id === i2vId) : undefined;
+                const size = videoBoxFromImagePixels(i2vNode?.metadata?.naturalWidth, i2vNode?.metadata?.naturalHeight, newNode);
+                newNode = { ...newNode, ...size, position: { x: newNode.position.x + newNode.width / 2 - size.width / 2, y: newNode.position.y + newNode.height / 2 - size.height / 2 } };
+            }
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
             if (!connection) {
                 message.warning(t("canvas.projectPage.configConnection"));
@@ -2055,7 +2080,13 @@ function InfiniteCanvasPage() {
 
             try {
                 const generationContext = await hydrateNodeGenerationContext(
-                    buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? t("canvas.projectPage.editTextPrompt", { source: sourceTextContent, prompt }) : prompt),
+                    buildNodeGenerationContext(
+                        nodeId,
+                        nodesRef.current,
+                        connectionsRef.current,
+                        editingTextNode ? t("canvas.projectPage.editTextPrompt", { source: sourceTextContent, prompt }) : prompt,
+                        { followTextImages: mode === "video" },
+                    ),
                 );
                 const effectivePrompt = generationContext.prompt.trim();
                 if (runController.signal.aborted) return;
@@ -2207,17 +2238,25 @@ function InfiniteCanvasPage() {
                 }
 
                 if (mode === "video") {
-                    const spec = nodeSizeFromRatio(generationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
+                    const ratioSpec = nodeSizeFromRatio(generationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
+                    const refNode = generationContext.referenceImages[0] ? nodesRef.current.find((node) => node.id === generationContext.referenceImages[0].id) : undefined;
+                    const spec = generationContext.referenceImages[0]
+                        ? videoBoxFromImagePixels(refNode?.metadata?.naturalWidth, refNode?.metadata?.naturalHeight, ratioSpec)
+                        : isEmptyVideoNode && sourceNode
+                          ? { width: sourceNode.width, height: sourceNode.height }
+                          : ratioSpec;
                     const videoId = isEmptyVideoNode ? nodeId : nanoid();
                     const parent = sourceNode?.position || { x: 0, y: 0 };
                     const videoNode: CanvasNodeData = {
                         id: videoId,
                         type: CanvasNodeType.Video,
                         title: effectivePrompt.slice(0, 32) || "Generated Video",
-                        position: isEmptyVideoNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y },
-                        width: isEmptyVideoNode ? sourceNode.width : spec.width,
-                        height: isEmptyVideoNode ? sourceNode.height : spec.height,
+                        position: isEmptyVideoNode && sourceNode
+                            ? { x: sourceNode.position.x + sourceNode.width / 2 - spec.width / 2, y: sourceNode.position.y + sourceNode.height / 2 - spec.height / 2 }
+                            : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y },
+                        width: spec.width,
+                        height: spec.height,
                         metadata: {
                             prompt: effectivePrompt,
                             status: NODE_STATUS_LOADING,
@@ -2378,7 +2417,7 @@ function InfiniteCanvasPage() {
                 return;
             }
 
-            const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
+            const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || "", { followTextImages: node.type === CanvasNodeType.Video }));
             const prompt = (savedImageMetadata?.prompt || context?.prompt || "").trim();
             if (!prompt) {
                 message.warning(t("canvas.projectPage.retryPromptMissing"));

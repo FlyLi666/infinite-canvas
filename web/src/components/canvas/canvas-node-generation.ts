@@ -27,8 +27,10 @@ export type NodeGenerationInput = {
     audio?: ReferenceAudio;
 };
 
-export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string): NodeGenerationContext {
-    const inputs = buildNodeGenerationInputs(nodeId, nodes, connections);
+export type NodeGenerationOptions = { followTextImages?: boolean };
+
+export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string, options?: NodeGenerationOptions): NodeGenerationContext {
+    const inputs = buildNodeGenerationInputs(nodeId, nodes, connections, options);
     const sourceNode = nodes.find((node) => node.id === nodeId);
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
         return buildComposerGenerationContext(inputs, prompt);
@@ -119,8 +121,8 @@ export function getNodeGenerationInputSummary(node: CanvasNodeData | undefined, 
     };
 }
 
-export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): NodeGenerationInput[] {
-    return getGenerationResourceNodes(nodeId, nodes, connections).flatMap((node): NodeGenerationInput[] => {
+export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], options?: NodeGenerationOptions): NodeGenerationInput[] {
+    const inputs = getGenerationResourceNodes(nodeId, nodes, connections).flatMap((node): NodeGenerationInput[] => {
         const image = readReferenceImage(node);
         if (image) return [{ nodeId: node.id, type: "image" as const, title: node.title, image }];
         const video = readReferenceVideo(node);
@@ -131,6 +133,26 @@ export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[
         if (text) return [{ nodeId: node.id, type: "text" as const, title: node.title, text }];
         return [];
     });
+    return options?.followTextImages ? appendTextAttachedImages(inputs, nodes, connections) : inputs;
+}
+
+/** One hop through connected text nodes for I2V first-frame. Do not walk through images. */
+function appendTextAttachedImages(inputs: NodeGenerationInput[], nodes: CanvasNodeData[], connections: CanvasConnection[]): NodeGenerationInput[] {
+    const seen = new Set(inputs.map((input) => input.nodeId));
+    const extras: NodeGenerationInput[] = [];
+    for (const input of inputs) {
+        if (input.type !== "text") continue;
+        for (const connection of connections) {
+            if (connection.toNodeId !== input.nodeId) continue;
+            const node = nodes.find((item) => item.id === connection.fromNodeId);
+            if (!node || seen.has(node.id)) continue;
+            const image = readReferenceImage(node);
+            if (!image) continue;
+            seen.add(node.id);
+            extras.push({ nodeId: node.id, type: "image", title: node.title, image });
+        }
+    }
+    return extras.length ? [...inputs, ...extras] : inputs;
 }
 
 export function buildNodeResponseMessages(context: NodeGenerationContext): AiTextMessage[] {
