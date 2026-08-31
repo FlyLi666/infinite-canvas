@@ -25,6 +25,8 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 - 改成链接后的图生图：把一张 GROK 成片连到新的/空图片节点，提示词如「增加个怪物」，模型 GROK 2.0。目标节点应离开「生成中」，不要一直空着只亮红「停止」。GPT 从 `img.flyli.cn` 成片改图仍走 multipart 文件。
 
+- GROK 2.0 白板多图改图：连 2–3 张参考图再生成。请求必须走 `/images/edits` JSON，字段是 `images: [{url, type: "image_url"}, …]`（不要再发 `image` 数组），并带 `aspect_ratio` + `resolution`，不要发像素 `size`。提示词应带 `<IMAGE_0>` / `<IMAGE_1>` / `<IMAGE_2>`。只连 1 张时仍发 `image: {url, type: "image_url"}`，不要带 `images`。连 4 张以上应提示只用前 3 张，然后继续生成。GPT 改图仍走 multipart。
+
 - 组装提示词：配置节点开启组装后，只连上游文本/图、正文不写 `@`，点生成应带上全部已连接内容（产出能体现上游设定），角标数量与实际发送一致。正文写了 `@[node:…]` 时仍只带被引用项，未引用的上游不进请求，角标也只计被引用的。
 
 - 模型显示名：下拉应为「GPT 生图 / GROK 2.0 / GROK 视频 / Seedance 2.0 / 2.5 / GROK 4.6 / Sol / Luna / Terra」。不应再出现快速/写实/旧改图或「GROK-高质量」。English 为 GPT Image / GROK 2.0 / GROK Video / GROK 4.6。

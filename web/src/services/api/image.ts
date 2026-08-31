@@ -1,4 +1,5 @@
 import axios from "axios";
+import { message } from "antd";
 
 import i18n from "@/i18n";
 import { humanizeGenerationError } from "@/lib/generation-errors";
@@ -159,6 +160,7 @@ const IMAGE_MAX_PIXELS = 8294400;
 const IMAGE_MAX_EDGE = 3840;
 const IMAGE_MAX_RATIO = 3;
 const IMAGE_OUTPUT_FORMAT = "png";
+const GROK_EDIT_MAX_IMAGES = 3;
 
 const GEMINI_SUPPORTED_RATIOS = ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"];
 const GEMINI_IMAGE_SIZE_BY_QUALITY: Record<string, string> = { low: "1K", medium: "2K", high: "4K", standard: "1K", hd: "2K" };
@@ -1111,6 +1113,24 @@ async function resolveEditImageFile(image: ReferenceImage, signal?: AbortSignal)
     throw new Error(i18n.t("common.imageReadFailed"));
 }
 
+function limitGrokEditReferences(references: ReferenceImage[]) {
+    if (references.length <= GROK_EDIT_MAX_IMAGES) return references;
+    message.warning(apiText("grokEditImageLimit", { max: GROK_EDIT_MAX_IMAGES }));
+    return references.slice(0, GROK_EDIT_MAX_IMAGES);
+}
+
+function buildGrokEditPrompt(prompt: string, references: ReferenceImage[]) {
+    if (references.length < 2) return buildImageReferencePromptText(prompt, references);
+    const labels = references.map((_, index) => `<IMAGE_${index}>`).join(i18n.t("imageReferences.separator"));
+    return i18n.t("imageReferences.promptPrefix", { labels, prompt: prompt.trim() });
+}
+
+function grokEditSourceFields(urls: string[]) {
+    if (urls.length === 1) return { image: { url: urls[0], type: "image_url" as const } };
+    if (urls.length >= 2) return { images: urls.map((url) => ({ url, type: "image_url" as const })) };
+    return { image: urls.map((url) => ({ url, type: "image_url" as const })) };
+}
+
 async function buildGrokEditPayload(
     model: string,
     prompt: string,
@@ -1122,14 +1142,13 @@ async function buildGrokEditPayload(
     mask?: ReferenceImage,
 ) {
     const urls = await Promise.all(references.map(resolveEditImageUrl));
-    const image = urls.length === 1 ? { url: urls[0], type: "image_url" } : urls.map((url) => ({ url, type: "image_url" }));
     return {
         model,
         prompt,
         n,
         response_format: imageResponseFormat(model),
         output_format: IMAGE_OUTPUT_FORMAT,
-        image,
+        ...grokEditSourceFields(urls),
         ...(mask ? { mask: { url: await resolveEditImageUrl(mask), type: "image_url" } } : {}),
         ...(quality ? { quality } : {}),
         ...(geometry || {}),
@@ -1212,8 +1231,10 @@ async function requestEditInner(config: AiConfig, prompt: string, references: Re
     const requestSize = grokGeometry ? undefined : resolveRequestSize(quality, config.size);
     const background = caps.transparentBackground ? normalizeBackground(config.background) : undefined;
     const grokEdit = Boolean(grokGeometry) || isGrokImagineImageModel(selectedModel);
+    const grokReferences = grokEdit ? limitGrokEditReferences(references) : references;
+    const grokPrompt = grokEdit ? buildGrokEditPrompt(prompt, grokReferences) : requestPrompt;
     const payload = grokEdit
-        ? await buildGrokEditPayload(requestConfig.model, withSystemPrompt(requestConfig, requestPrompt), n, quality, grokGeometry, background, references, mask)
+        ? await buildGrokEditPayload(requestConfig.model, withSystemPrompt(requestConfig, grokPrompt), n, quality, grokGeometry, background, grokReferences, mask)
         : await buildOpenAIEditForm(requestConfig.model, withSystemPrompt(requestConfig, requestPrompt), n, quality, requestSize, background, references, mask, options?.signal);
 
     try {

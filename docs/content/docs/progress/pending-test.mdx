@@ -27,6 +27,8 @@ The current release needs manual verification in these areas:
 
 - Image-to-image after the URL change: connect a Grok result node to a new/empty image node, prompt something like “add a monster”, GROK 2.0. The target should leave “Generating”, not stay empty with a stuck Stop button. GPT edit from an `img.flyli.cn` result should still upload the file as multipart.
 
+- GROK 2.0 whiteboard multi-image edit: connect 2–3 reference images and generate. The request must POST `/images/edits` as JSON with `images: [{url, type: "image_url"}, …]` (no `image` array), plus `aspect_ratio` and `resolution` (no pixel `size`). The prompt should mention `<IMAGE_0>` / `<IMAGE_1>` / `<IMAGE_2>`. A single reference must still send `image: {url, type: "image_url"}` without `images`. Connecting 4+ images should toast that only the first 3 are used, then continue. GPT edit must stay multipart.
+
 - Model labels: picker should read GPT 生图 / GROK 2.0 / GROK 视频 / Seedance 2.0 / 2.5 / GROK 4.6 / Sol / Luna / Terra. Do not show Fast / Photo / Legacy Edit or “GROK-高质量”. English: GPT Image / GROK 2.0 / GROK Video / GROK 4.6.
 - GROK 2.0 aspect/tier: with the bar set to 中 · 9:16(2k), the request must send `aspect_ratio=9:16` and `resolution=2k` (not only a pixel `size`). The result should be a portrait image; the node should follow the source ratio; the badge must not fall back to 1024×1024. 低 + 9:16 stays 1K portrait — the 中 quality pill must not upgrade it to 2K.
 - Grok Image 2.0: image picker shows “GROK 2.0”; quality pills are only 低/中 (no auto/high); sizes stay 1K/2K with no 4K or transparent background; `n` ≤ 10; switching from auto/high falls back to 中.

@@ -104,3 +104,4 @@ GitHub 链接保留上游仓（MIT 要求），不要改成 AL。
 - 本地启动或浏览器验收时不要关闭用户已经打开的浏览器窗口或标签页；需要自动化验证时使用独立测试页面，避免打断用户当前页面和对话状态。
 - 登录、充值、密钥管理走研路AI 中转站（账本）。Grok / 文本生成走 `YANLU_CN_API_BASE_URL`（亚洲近节点 `https://gen-api.flyli.cn`），GPT Image 2 走 `YANLU_IMG_API_BASE_URL`。三个常量必须分开写；禁止把生成请求绑回门户常量。不要把托管渠道的生成打到 CPA 的 `api.flyli.cn`：那把钥匙不是研路密钥，也不会扣中转站余额。
 - `docs/agent/` 是内部交接文档，已写入 `.gitignore`，禁止提交或 push 到公开 origin。
+- 画布功能验收禁止在真实浏览器里手连节点、拖线或点端口。必须用代码生成已经连好线的 export v3 ZIP（`app: "infinite-canvas"`、`version: 3`），导入后再点「开始生成」。Playwright 若用，只允许：打开页面、选 ZIP 导入、进入项目、点「开始生成」、读 Network。禁止 createNode、连线、拖拽。
