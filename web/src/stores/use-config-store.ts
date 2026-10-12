@@ -52,6 +52,7 @@ export type AiConfig = {
     vquality: string;
     videoGenerateAudio: string;
     videoWatermark: string;
+    videoMode: string;
     systemPrompt: string;
     reasoningEffort: ReasoningEffort;
     models: string[];
@@ -60,6 +61,10 @@ export type AiConfig = {
     background: string;
     count: string;
     canvasImageCount: string;
+    proxyEnabled: boolean;
+    proxyUrl: string;
+    nodeRegenerateBehavior: "new-node" | "overwrite";
+    autoFocusOnSelect: boolean;
 };
 
 export type WebdavSyncConfig = {
@@ -69,7 +74,7 @@ export type WebdavSyncConfig = {
     directory: string;
     lastSyncedAt: string;
 };
-export type ConfigTabKey = "channels" | "preferences" | "prompt-sources" | "webdav" | "local-storage";
+export type ConfigTabKey = "channels" | "local-proxy" | "preferences" | "prompt-sources" | "webdav" | "local-storage";
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 const CHANNEL_MODEL_SEPARATOR = "::";
@@ -114,6 +119,10 @@ const MODEL_CATALOG_KEYS: Record<string, string> = {
     "gpt-5.6-terra": "gpt56Terra",
 };
 
+// 本地代理页签和请求链路均不启用（保留导出以兼容旧的调用点）。
+export const LOCAL_PROXY_PACKAGE = "@basketikun/canvas-proxy";
+export const DEFAULT_LOCAL_PROXY_URL = "http://127.0.0.1:23210";
+
 export const defaultConfig: AiConfig = {
     channelMode: "remote",
     baseUrl: YANLU_IMG_API_BASE_URL,
@@ -137,6 +146,7 @@ export const defaultConfig: AiConfig = {
     vquality: "720",
     videoGenerateAudio: "true",
     videoWatermark: "false",
+    videoMode: "frames",
     systemPrompt: "",
     reasoningEffort: "auto",
     models: [
@@ -156,6 +166,10 @@ export const defaultConfig: AiConfig = {
     background: "",
     count: "1",
     canvasImageCount: "1",
+    proxyEnabled: false,
+    proxyUrl: DEFAULT_LOCAL_PROXY_URL,
+    nodeRegenerateBehavior: "new-node",
+    autoFocusOnSelect: false,
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
@@ -221,12 +235,20 @@ export function modelMatchesCapability(config: AiConfig, value: string, capabili
 
 export function resolveModelForCapability(config: AiConfig, currentModel: string | undefined, capability: ModelCapability) {
     const hasYanlu = config.channels.some((channel) => channel.id === YANLU_CHANNEL_ID);
-    const usable = (value?: string) => Boolean(value) && !(hasYanlu && !isYanluModelValue(value)) && modelMatchesCapability(config, value!, capability);
-    if (usable(currentModel)) return currentModel!;
-    const preferred = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : config.textModel;
-    if (usable(preferred)) return preferred;
+    const defaultModel = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : config.textModel;
+    const fallbackModel = capability === "image" ? defaultConfig.imageModel : capability === "video" ? defaultConfig.videoModel : defaultConfig.textModel;
+    // 保留已选但当前不可用的模型，让就绪检查去拦生成，而不是静默换模型。
+    for (const model of [currentModel, defaultModel]) {
+        if (!model) continue;
+        const configuredCapability = modelCapabilityOf(config, model);
+        if (!configuredCapability || configuredCapability === capability) {
+            // 研路托管渠道在列表里时，非研路模型一律回落到研路默认，保证始终能出图。
+            if (hasYanlu && !isYanluModelValue(model)) break;
+            return model;
+        }
+    }
     if (hasYanlu) return yanluManagedModel(capability);
-    return capability === "image" ? defaultConfig.imageModel : capability === "video" ? defaultConfig.videoModel : defaultConfig.textModel;
+    return fallbackModel;
 }
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
@@ -240,6 +262,8 @@ export function resolveModelScript(config: AiConfig, value: string) {
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
+    // 模型必须真实存在于某个渠道；否则视为未就绪（避免向默认/第一个渠道误发）。
+    if (!findChannelModel(config, model)) return false;
     const request = resolveModelRequestConfig(config, model);
     return Boolean(model.trim() && request.baseUrl.trim() && request.apiKey.trim());
 }
@@ -311,7 +335,10 @@ export const useConfigStore = create<ConfigStore>()(
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
+                        videoMode: config.videoMode === "reference" ? "reference" : "frames",
                         canvasImageCount: config.canvasImageCount || "1",
+                        nodeRegenerateBehavior: config.nodeRegenerateBehavior === "overwrite" ? "overwrite" : "new-node",
+                        autoFocusOnSelect: Boolean(config.autoFocusOnSelect),
                     },
                 };
             },
@@ -355,6 +382,7 @@ export function createModelChannel(channel?: ModelChannelInput): ModelChannel {
         models: normalizeChannelModels(channel?.models),
     };
 }
+
 
 export function encodeChannelModel(channelId: string, model: string) {
     return `${channelId}${CHANNEL_MODEL_SEPARATOR}${model.trim()}`;
@@ -660,4 +688,15 @@ export async function applyLocalChannelOverride() {
     } catch {
         return false;
     }
+}
+
+export function normalizeLocalProxyUrl(value: string) {
+    const trimmed = value.trim().replace(/\/+$/, "");
+    if (!trimmed) return "";
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+}
+
+/** 研路版不接本地代理：请求一律直连，`withLocalProxy` 原样返回。 */
+export function withLocalProxy(url: string) {
+    return url;
 }

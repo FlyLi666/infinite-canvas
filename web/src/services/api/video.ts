@@ -12,15 +12,17 @@ import { isBrowserReachableMediaUrl, mediaHostsFromBaseUrl } from "@/lib/reachab
 import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
 import type { ReferenceImage } from "@/types/image";
+import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
 type VideoResponse = { id?: string; request_id?: string; status?: string; error?: { message?: string }; url?: string; result_url?: string; video_url?: string; video?: { url?: string } | null; content?: { video_url?: string; url?: string } | null };
 type ApiVideoResponse = VideoResponse | { code?: number | string; data?: VideoResponse | null; msg?: string; message?: string; error?: { message?: string } };
 type ApiEnvelope<T> = T | { code?: number | string; data?: T | null; msg?: string; message?: string; error?: { message?: string } };
 type RequestOptions = { signal?: AbortSignal };
+type VideoMediaOptions = RequestOptions & { videos?: ReferenceVideo[]; audios?: ReferenceAudio[] };
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
-export type VideoGenerationTask = { id: string; provider: "openai" | "plugin"; model: string };
+export type VideoGenerationTask = { id: string; provider: "openai" | "gemini" | "plugin"; model: string };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
 /** Results for scripted (plugin) video models, which run their own create+poll in one shot at task creation. */
@@ -37,25 +39,38 @@ function aiHeaders(config: AiConfig, contentType?: string) {
     };
 }
 
-export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
-    try {
-        const task = await createVideoGenerationTask(config, prompt, references, options);
-        for (let attempt = 0; attempt < 120; attempt += 1) {
-            if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-            const state = await pollVideoGenerationTask(config, task, options);
-            if (state.status === "completed") return state.result;
-            if (state.status === "failed") throw new Error(state.error);
-            if (attempt === 119) throw new Error(apiText("videoTimeout", { provider: "" }));
-            await delay(2500, options?.signal);
-        }
-        throw new Error(apiText("videoTimeout", { provider: "" }));
-    } finally {
-        refreshYanluBalance();
-    }
+export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationResult> {
+    return waitForVideoGenerationTask(config, await createVideoGenerationTask(config, prompt, references, options), options);
 }
 
-export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: RequestOptions): Promise<VideoGenerationTask> {
+/** Poll a created task until it finishes, fails, or times out. */
+export async function waitForVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+        if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const state = await pollVideoGenerationTask(config, task, options);
+        if (state.status === "completed") return state.result;
+        if (state.status === "failed") throw videoTaskFailed(state.error);
+        if (attempt === 119) throw new Error(apiText("videoTimeout", { provider: "" }));
+        await delay(2500, options?.signal);
+    }
+    throw new Error(apiText("videoTimeout", { provider: "" }));
+}
+
+/** A failed task should clear the stored task id so the node can retry from scratch. */
+export function isVideoTaskFailed(error: unknown) {
+    return error instanceof Error && error.name === "VideoTaskFailed";
+}
+
+function videoTaskFailed(message: string) {
+    const error = new Error(message);
+    error.name = "VideoTaskFailed";
+    return error;
+}
+
+export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     try {
+        // 研路托管视频暂不支持参考视频/参考音频，收到就直接报人话，不要静默丢弃。
+        if (options?.videos?.length || options?.audios?.length) throw new Error(apiText("videoReferenceUnsupported"));
         const selectedModel = (config.model || config.videoModel).trim();
         const requestConfig = resolveModelRequestConfig(config, selectedModel);
         const script = resolveModelScript(config, selectedModel);

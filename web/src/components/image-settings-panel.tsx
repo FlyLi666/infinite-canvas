@@ -47,6 +47,7 @@ const aspectOptions = [
 
 export const imageQualityOptions = qualityOptions.map((item) => ({ value: item.value, get label() { return i18n.t(`settingsPanels.common.${item.labelKey}`); } }));
 export const imageAspectOptions = aspectOptions.map((item) => ({ value: item.size || item.value, label: item.label }));
+export const imageScaleOptions = GPT_IMAGE_25_TIERS.map((value) => ({ value, get label() { return i18n.t(`settingsPanels.image.tiers.${value}`); } }));
 
 type ImageSettingsPanelProps = {
     config: AiConfig;

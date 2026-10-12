@@ -17,15 +17,17 @@ const sizeOptions = [
     { value: "auto", labelKey: "auto", width: 0, height: 0 },
 ];
 
+
 const grokCaps = modelCapabilities("grok-imagine-video-1.5");
 
 export const videoResolutionOptions = grokCaps.videoResolutions.map((value) => ({ value, get label() { return videoResolutionLabel(value, "grok-imagine-video-1.5"); } }));
 export const videoSizeOptions = sizeOptions.map((item) => ({ value: item.value, get label() { return i18n.t(`settingsPanels.video.sizes.${item.labelKey}`); } }));
 export const videoSecondOptions = grokCaps.videoSeconds.map((value) => String(value));
+export const videoSecondsRange = { min: grokCaps.videoSecondsMin, max: grokCaps.videoSecondsMax };
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark", value: string) => void;
+    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
@@ -144,6 +146,14 @@ export function videoSizeLabel(value: string) {
 export function videoSecondsLabel(value: string) {
     if (String(value).trim() === "-1") return i18n.t("settingsPanels.video.smart");
     return `${value || "6"}s`;
+}
+
+export function videoModeLabel(value: string) {
+    return i18n.t(`settingsPanels.video.modes.${normalizeVideoModeValue(value)}`);
+}
+
+export function normalizeVideoModeValue(value: string | undefined) {
+    return value === "reference" ? "reference" : "frames";
 }
 
 export function normalizeVideoSizeValue(value: string) {

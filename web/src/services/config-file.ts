@@ -25,7 +25,7 @@ export function exportAppConfig() {
         version: 1,
         exportedAt: new Date().toISOString(),
         config: stripExportedSecrets(config),
-        webdav,
+        webdav: { ...webdav, password: "" },
         promptSources: { sources, schedule },
     };
     saveAs(new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" }), "infinite-canvas-config.json");
@@ -41,6 +41,7 @@ export async function importAppConfig(file: File) {
     if (data.app !== "infinite-canvas" || data.version !== 1 || !data.config || !data.webdav || !data.promptSources) throw new Error(i18n.t("config.invalidFile"));
     const current = useConfigStore.getState();
     const channels = retainPublicChannels(current.config.channels);
+    const managed = channels.find((channel) => channel.id === YANLU_CHANNEL_ID);
     useConfigStore.setState({
         config: {
             ...data.config,

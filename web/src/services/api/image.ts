@@ -16,7 +16,7 @@ import {
     modelCapabilities,
     parseGptImage25Quality,
 } from "@/lib/model-capabilities";
-import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, useConfigStore, YANLU_CHANNEL_ID, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, useConfigStore, withLocalProxy, YANLU_CHANNEL_ID, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { refreshYanluBalance, useAuthStore } from "@/stores/use-auth-store";
 import { useImageTaskStore } from "@/stores/use-image-task-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
@@ -151,6 +151,7 @@ function notifyTaskUpdate(update: ImageTaskUpdate, options?: RequestOptions) {
     useImageTaskStore.getState().setStatusText(describeImageTaskUpdate(update));
 }
 
+const IMAGE_QUALITY_VALUES = ["low", "medium", "high", "xhigh", "max"];
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
     medium: 2048,
@@ -171,6 +172,8 @@ const IMAGE_MAX_EDGE = 3840;
 const IMAGE_MAX_RATIO = 3;
 const IMAGE_OUTPUT_FORMAT = "png";
 const GROK_EDIT_MAX_IMAGES = 3;
+// 与 image-storage 的下载超时保持一致，避免接口挂起时节点一直停在生成中。
+const IMAGE_REQUEST_TIMEOUT_MS = 10 * 60_000;
 
 const GEMINI_SUPPORTED_RATIOS = ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"];
 const GEMINI_IMAGE_SIZE_BY_QUALITY: Record<string, string> = { low: "1K", medium: "2K", high: "4K", standard: "1K", hd: "2K" };
@@ -204,7 +207,6 @@ function resolveSize(quality: string | undefined, ratio: string): string {
         shortSide = DEFAULT_IMAGE_SHORT_SIDE;
         longSide = Math.round((shortSide * longRatio) / IMAGE_SIZE_STEP) * IMAGE_SIZE_STEP;
     }
-
     const width = isLandscape ? longSide : shortSide;
     const height = isLandscape ? shortSide : longSide;
     validateImageSize(width, height);
@@ -257,7 +259,8 @@ function resolveRequestSize(quality: string | undefined, size: string) {
 function resolveGptImage25Request(config: AiConfig) {
     const { tier } = parseGptImage25Quality(config.quality);
     const sizeValue = (config.size || "").trim();
-    const requestSize = /^\d+x\d+$/i.test(sizeValue) ? sizeValue : gptImage25PixelSize(tier, sizeValue || "1:1");
+    // 尺寸只跟画质档位走：无论 size 是像素还是比例，都先取比例再按档位算，长边严格 = 1024/2048/3840。
+    const requestSize = gptImage25PixelSize(tier, sizeValue || "1:1");
     const dimensions = parseImageDimensions(requestSize);
     if (!dimensions) throw new Error(apiText("invalidImageSizeFormat"));
     if (dimensions.width % IMAGE_SIZE_STEP !== 0 || dimensions.height % IMAGE_SIZE_STEP !== 0) throw new Error(apiText("imageDimensionStep"));
@@ -274,9 +277,9 @@ function resolveGeminiImageConfig(config: AiConfig) {
     const dimensions = parseImageDimensions(value);
     const ratio = dimensions ? `${dimensions.width}:${dimensions.height}` : value;
     const aspectRatio = value && value.toLowerCase() !== "auto" ? closestGeminiAspectRatio(ratio) : undefined;
-    const imageSize = supportsGeminiImageSize(config.model) ? resolveGeminiImageSize(config.quality, dimensions) : undefined;
+    const imageSize = resolveGeminiImageSize(config.quality, dimensions);
     const image = { ...(aspectRatio ? { aspectRatio } : {}), ...(imageSize ? { imageSize } : {}) };
-    return Object.keys(image).length ? { responseFormat: { image } } : {};
+    return Object.keys(image).length ? { imageConfig: image } : {};
 }
 
 function closestGeminiAspectRatio(value: string) {
@@ -289,6 +292,7 @@ function closestGeminiAspectRatio(value: string) {
     });
 }
 
+/** Gemini takes the resolution tier and the ratio separately; the tier comes from the quality preset. */
 function resolveGeminiImageSize(quality: string, dimensions: { width: number; height: number } | null) {
     const normalizedQuality = normalizeQuality(quality);
     if (normalizedQuality) return GEMINI_IMAGE_SIZE_BY_QUALITY[normalizedQuality];
@@ -300,12 +304,7 @@ function resolveGeminiImageSize(quality: string, dimensions: { width: number; he
     return "4K";
 }
 
-function supportsGeminiImageSize(model: string) {
-    const value = model.toLowerCase();
-    return value.includes("gemini-3") || value.includes("3.1") || value.includes("3-pro");
-}
-
-function resolveImageDataUrl(item: Record<string, unknown>) {
+function resolveImageSource(item: Record<string, unknown>) {
     if (typeof item.b64_json === "string" && item.b64_json) {
         return `data:image/png;base64,${item.b64_json}`;
     }
@@ -331,8 +330,8 @@ function parseImagePayload(payload: ImageApiResponse, extraHosts: readonly strin
         || [];
     const images =
         imageList
-            .map(resolveImageDataUrl)
-            .filter((value): value is string => Boolean(value) && isBrowserReachableMediaUrl(value, extraHosts))
+            .map(resolveImageSource)
+            .filter((value): value is string => typeof value === "string" && isBrowserReachableMediaUrl(value, extraHosts))
             .map((dataUrl) => ({ id: nanoid(), dataUrl }));
 
     if (images.length === 0 && typeof payload.b64_json === "string" && payload.b64_json) {
@@ -635,7 +634,8 @@ function readApiErrorMessage(value: unknown): string {
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return apiText("requestCanceled");
     if (axios.isAxiosError(error)) {
-        if (!error.response && error.code === "ERR_NETWORK") return apiText("corsRequired");
+        if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") return apiText("imageTimeout");
+        if (!error.response && error.code === "ERR_NETWORK") return apiText("requestFailed");
         const responseData = error.response?.data;
         // Prefer the API error from the response body.
         const apiMsg = readApiErrorMessage(responseData);
@@ -687,8 +687,8 @@ function geminiModelName(model: string) {
 
 function geminiApiUrl(config: Pick<AiConfig, "baseUrl" | "model">, action?: "generateContent" | "streamGenerateContent") {
     const baseUrl = geminiBaseUrl(config);
-    if (!action) return `${baseUrl}/models`;
-    return `${baseUrl}/models/${encodeURIComponent(geminiModelName(config.model))}:${action}`;
+    if (!action) return withLocalProxy(`${baseUrl}/models`);
+    return withLocalProxy(`${baseUrl}/models/${encodeURIComponent(geminiModelName(config.model))}:${action}`);
 }
 
 function geminiHeaders(config: Pick<AiConfig, "apiKey">) {
@@ -1024,7 +1024,7 @@ async function requestGeminiImagesOnce(config: AiConfig, prompt: string, referen
             ...toGeminiBody(config, [{ role: "user", content: prompt }], { generationConfig: { responseModalities: ["TEXT", "IMAGE"], ...resolveGeminiImageConfig(config) } }),
             contents: [{ role: "user", parts }],
         },
-        { headers: geminiHeaders(config), signal: options?.signal },
+        { headers: geminiHeaders(config), signal: options?.signal, timeout: IMAGE_REQUEST_TIMEOUT_MS },
     );
     return parseGeminiImagePayload(response.data);
 }
