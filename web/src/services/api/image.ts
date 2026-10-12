@@ -5,7 +5,17 @@ import i18n from "@/i18n";
 import { humanizeGenerationError } from "@/lib/generation-errors";
 import { isYanluImageApiBaseUrl } from "@/lib/yanlu-endpoints";
 import { isBrowserReachableMediaUrl, mediaHostsFromBaseUrl } from "@/lib/reachable-media";
-import { clampImageCount, fallbackImageQualityForModel, grokImageGeometry, isGrokImagineImageModel, modelCapabilities } from "@/lib/model-capabilities";
+import {
+    clampImageCount,
+    fallbackImageQualityForModel,
+    gptImage25PixelSize,
+    gptImage25RequestPipeline,
+    grokImageGeometry,
+    isGptImage25Model,
+    isGrokImagineImageModel,
+    modelCapabilities,
+    parseGptImage25Quality,
+} from "@/lib/model-capabilities";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, useConfigStore, YANLU_CHANNEL_ID, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { refreshYanluBalance, useAuthStore } from "@/stores/use-auth-store";
 import { useImageTaskStore } from "@/stores/use-image-task-store";
@@ -241,6 +251,22 @@ function resolveRequestSize(quality: string | undefined, size: string) {
     }
     if (value.includes(":")) return resolveSize(quality, value);
     throw new Error(apiText("invalidImageSizeFormat"));
+}
+
+/** GPT 2.5：必须发明确像素 + yanlu_pipeline；上游 quality 固定 auto；pipeline 固定 native。 */
+function resolveGptImage25Request(config: AiConfig) {
+    const { tier } = parseGptImage25Quality(config.quality);
+    const sizeValue = (config.size || "").trim();
+    const requestSize = /^\d+x\d+$/i.test(sizeValue) ? sizeValue : gptImage25PixelSize(tier, sizeValue || "1:1");
+    const dimensions = parseImageDimensions(requestSize);
+    if (!dimensions) throw new Error(apiText("invalidImageSizeFormat"));
+    if (dimensions.width % IMAGE_SIZE_STEP !== 0 || dimensions.height % IMAGE_SIZE_STEP !== 0) throw new Error(apiText("imageDimensionStep"));
+    if (Math.max(dimensions.width, dimensions.height) > IMAGE_MAX_EDGE) throw new Error(apiText("imageEdgeLimit"));
+    return {
+        quality: "auto" as const,
+        size: `${dimensions.width}x${dimensions.height}`,
+        yanlu_pipeline: gptImage25RequestPipeline(),
+    };
 }
 
 function resolveGeminiImageConfig(config: AiConfig) {
@@ -1034,8 +1060,9 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
     const n = clampImageCount(selectedModel, Number(config.count) || 1);
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {
-        const quality = normalizeQuality(config.quality);
-        const requestSize = resolveRequestSize(quality, config.size);
+        const gpt25 = isGptImage25Model(selectedModel) ? resolveGptImage25Request(config) : null;
+        const quality = gpt25 ? gpt25.quality : normalizeQuality(config.quality);
+        const requestSize = gpt25 ? gpt25.size : resolveRequestSize(quality, config.size);
         const background = normalizeBackground(config.background);
         try {
             const result = await runModelPlugin({
@@ -1044,7 +1071,7 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
                 config: requestConfig,
                 prompt: withSystemPrompt(requestConfig, prompt),
                 images: [],
-                params: { size: requestSize, quality, count: n, ...(background ? { background } : {}) },
+                params: { size: requestSize, quality, count: n, ...(background ? { background } : {}), ...(gpt25 ? { yanlu_pipeline: gpt25.yanlu_pipeline } : {}) },
                 signal: options?.signal,
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
@@ -1059,9 +1086,10 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
     }
-    const quality = caps.quality ? fallbackImageQualityForModel(selectedModel, normalizeQuality(config.quality) || config.quality) || undefined : undefined;
+    const gpt25 = isGptImage25Model(selectedModel) ? resolveGptImage25Request(config) : null;
+    const quality = gpt25 ? gpt25.quality : caps.quality ? fallbackImageQualityForModel(selectedModel, normalizeQuality(config.quality) || config.quality) || undefined : undefined;
     const grokGeometry = isGrokImagineImageModel(selectedModel) ? grokImageGeometry(config.size) : undefined;
-    const requestSize = grokGeometry ? undefined : resolveRequestSize(quality, config.size);
+    const requestSize = gpt25 ? gpt25.size : grokGeometry ? undefined : resolveRequestSize(quality, config.size);
     const background = caps.transparentBackground ? normalizeBackground(config.background) : undefined;
     try {
         return await runManagedImageRequest(
@@ -1078,6 +1106,7 @@ async function requestGenerationInner(config: AiConfig, prompt: string, options?
                                 ...(quality ? { quality } : {}),
                                 ...(grokGeometry ? grokGeometry : requestSize ? { size: requestSize } : {}),
                                 ...(background ? { background } : {}),
+                                ...(gpt25 ? { yanlu_pipeline: gpt25.yanlu_pipeline } : {}),
                                 response_format: imageResponseFormat(activeConfig.model),
                                 output_format: IMAGE_OUTPUT_FORMAT,
                             },
@@ -1166,6 +1195,7 @@ async function buildOpenAIEditForm(
     references: ReferenceImage[],
     mask: ReferenceImage | undefined,
     signal?: AbortSignal,
+    yanluPipeline?: "native" | "upscale",
 ) {
     const formData = new FormData();
     formData.set("model", model);
@@ -1176,6 +1206,7 @@ async function buildOpenAIEditForm(
     if (quality) formData.set("quality", quality);
     if (requestSize) formData.set("size", requestSize);
     if (background) formData.set("background", background);
+    if (yanluPipeline) formData.set("yanlu_pipeline", yanluPipeline);
     const files = await Promise.all(references.map((image) => resolveEditImageFile(image, signal)));
     files.forEach((file) => formData.append("image", file));
     if (mask) formData.set("mask", await resolveEditImageFile(mask, signal));
@@ -1198,8 +1229,9 @@ async function requestEditInner(config: AiConfig, prompt: string, references: Re
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {
-        const quality = normalizeQuality(config.quality);
-        const requestSize = resolveRequestSize(quality, config.size);
+        const gpt25 = isGptImage25Model(selectedModel) ? resolveGptImage25Request(config) : null;
+        const quality = gpt25 ? gpt25.quality : normalizeQuality(config.quality);
+        const requestSize = gpt25 ? gpt25.size : resolveRequestSize(quality, config.size);
         const background = normalizeBackground(config.background);
         const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
         try {
@@ -1209,7 +1241,7 @@ async function requestEditInner(config: AiConfig, prompt: string, references: Re
                 config: requestConfig,
                 prompt: withSystemPrompt(requestConfig, requestPrompt),
                 images: refs,
-                params: { size: requestSize, quality, count: n, ...(background ? { background } : {}) },
+                params: { size: requestSize, quality, count: n, ...(background ? { background } : {}), ...(gpt25 ? { yanlu_pipeline: gpt25.yanlu_pipeline } : {}) },
                 signal: options?.signal,
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
@@ -1226,16 +1258,17 @@ async function requestEditInner(config: AiConfig, prompt: string, references: Re
         }
     }
 
-    const quality = caps.quality ? fallbackImageQualityForModel(selectedModel, normalizeQuality(config.quality) || config.quality) || undefined : undefined;
+    const gpt25 = isGptImage25Model(selectedModel) ? resolveGptImage25Request(config) : null;
+    const quality = gpt25 ? gpt25.quality : caps.quality ? fallbackImageQualityForModel(selectedModel, normalizeQuality(config.quality) || config.quality) || undefined : undefined;
     const grokGeometry = isGrokImagineImageModel(selectedModel) ? grokImageGeometry(config.size) : undefined;
-    const requestSize = grokGeometry ? undefined : resolveRequestSize(quality, config.size);
+    const requestSize = gpt25 ? gpt25.size : grokGeometry ? undefined : resolveRequestSize(quality, config.size);
     const background = caps.transparentBackground ? normalizeBackground(config.background) : undefined;
     const grokEdit = Boolean(grokGeometry) || isGrokImagineImageModel(selectedModel);
     const grokReferences = grokEdit ? limitGrokEditReferences(references) : references;
     const grokPrompt = grokEdit ? buildGrokEditPrompt(prompt, grokReferences) : requestPrompt;
     const payload = grokEdit
         ? await buildGrokEditPayload(requestConfig.model, withSystemPrompt(requestConfig, grokPrompt), n, quality, grokGeometry, background, grokReferences, mask)
-        : await buildOpenAIEditForm(requestConfig.model, withSystemPrompt(requestConfig, requestPrompt), n, quality, requestSize, background, references, mask, options?.signal);
+        : await buildOpenAIEditForm(requestConfig.model, withSystemPrompt(requestConfig, requestPrompt), n, quality, requestSize, background, references, mask, options?.signal, gpt25?.yanlu_pipeline);
 
     try {
         return await runManagedImageRequest(

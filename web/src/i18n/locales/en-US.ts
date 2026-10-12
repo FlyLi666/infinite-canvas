@@ -33,7 +33,7 @@ export default {
     },
     settingsPanels: {
         common: { auto: "Auto", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high" },
-        image: { title: "Image settings", quality: "Quality", size: "Size", align16: "Align to multiples of 16", align16Hint: "Round dimensions up to the next multiple of 16 after input", aspectRatio: "Aspect ratio", transparent: "Transparent background", transparentHint: "Generate an image without a background when supported by the model", count: "Image count", images: "{{count}} images" },
+        image: { title: "Image settings", quality: "Quality", resolution: "Resolution", size: "Size", align16: "Align to multiples of 16", align16Hint: "Round dimensions up to the next multiple of 16 after input", aspectRatio: "Aspect ratio", transparent: "Transparent background", transparentHint: "Generate an image without a background when supported by the model", count: "Image count", images: "{{count}} images", upscale: "Upscale", native: "Native", pricePerImage: "${{price}}/image", tiers: { "1k": "1K", "2k": "2K", "4k": "4K" } },
         video: { title: "Video settings", quality: "Quality", size: "Size", seconds: "Seconds", resolution: "Resolution", ratio: "Aspect ratio", duration: "Duration", smart: "Smart", output: "Output", generateAudio: "Generate audio", watermark: "Add watermark", adaptive: "Adaptive", sizes: { landscape: "Landscape", portrait: "Portrait", square: "Square", widescreen: "Widescreen", tall: "Tall", auto: "Auto" }, ratios: { landscape: "Landscape", portrait: "Portrait", square: "Square", standardLandscape: "Standard landscape", standardPortrait: "Standard portrait", cinematic: "Cinematic", adaptive: "Adaptive" } },
         audio: { title: "Audio settings", voice: "Voice", format: "Format", speed: "Speed", instructions: "Voice instructions", instructionsPlaceholder: "For example: natural, warm, and suitable for narration." },
         text: { title: "Text settings", reasoning: "Reasoning effort", count: "Generation count" },
@@ -44,7 +44,8 @@ export default {
             addFirst: "Sign in to Yanlu AI first",
             capabilities: { image: "image generation", video: "video", text: "text", audio: "audio" },
             catalog: {
-                gptImage2: { name: "GPT Image", hint: "$2.3/image · best at text and edits" },
+                gptImage25Flare: { name: "2.5 Fast", hint: "Faster generation" },
+                gptImage25Sunburst: { name: "2.5 Stable", hint: "More refined" },
                 grokImagineImage: { name: "GROK Fast", hint: "Quick draft, not the finest" },
                 grokImagineImageQuality: { name: "GROK Photo", hint: "More photoreal, no edits" },
                 grokImagineImage20: { name: "GROK 2.0", hint: "1K $1.2 / 2K $2.2 · layout and edits" },
@@ -72,6 +73,10 @@ export default {
             insufficientBalance: "Insufficient balance. Please top up.",
             modelNotAllowed: "This model is not available right now.",
             serviceUnavailable: "The service is temporarily unavailable. Try again later.",
+            gptFailedTryGrok: "Credits have been refunded. Please try GROK image generation.",
+            contentModeration: "This content did not pass review. Try a different description.",
+            imageRequired: "A reference image is missing. Connect an image and retry.",
+            generationFailedRetry: "Generation failed. Please try again later.",
         },
     },
     auth: {

@@ -16,6 +16,7 @@ import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } f
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
+import { humanizeGenerationError } from "@/lib/generation-errors";
 import { YANLU_PORTAL_URL } from "@/lib/yanlu-endpoints";
 import { describeImageTaskUpdate, ImageGenerationError, requestEdit, requestGeneration } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
@@ -189,7 +190,7 @@ export default function ImagePage() {
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
-        const error = failed?.reason instanceof Error ? failed.reason.message : failCount ? t("workbench.generationFailed") : undefined;
+        const error = failed ? humanizeGenerationError(failed.reason, t("workbench.generationFailed"), model) : failCount ? t("workbench.generationFailed") : undefined;
         if (agentTaskId) updateAgentTask(agentTaskId, { status: successCount ? "succeeded" : "failed", successCount, failCount, error: successCount ? undefined : error });
 
         try {
@@ -212,7 +213,7 @@ export default function ImagePage() {
                     images: logImages,
                 }),
             );
-            successCount ? message.success(t("imageWorkbench.generated")) : message.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
+            successCount ? message.success(t("imageWorkbench.generated")) : message.error(error || t("workbench.generationFailed"));
         } finally {
             setRunning(false);
         }
@@ -346,7 +347,7 @@ export default function ImagePage() {
             setResults((value) =>
                 updateResultAt(value, index, {
                     status: "failed",
-                    error: error instanceof Error ? error.message : t("workbench.generationFailed"),
+                    error: humanizeGenerationError(error, t("workbench.generationFailed"), model),
                     errorCode: error instanceof ImageGenerationError ? error.code : undefined,
                     statusText: undefined,
                 }),
@@ -528,7 +529,7 @@ export default function ImagePage() {
                                     result.status === "success" && result.image ? (
                                         <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
-                                        <FailedImageCard key={result.id} error={result.error || t("workbench.generationFailed")} errorCode={result.errorCode} onRetry={() => retryResult(index)} />
+                                        <FailedImageCard key={result.id} error={result.error || t("workbench.generationFailed")} errorCode={result.errorCode} model={model} onRetry={() => retryResult(index)} />
                                     ) : (
                                         <PendingImageCard key={result.id} label={result.statusText} />
                                     ),
@@ -662,15 +663,16 @@ function PendingImageCard({ label }: { label?: string }) {
     );
 }
 
-function FailedImageCard({ error, errorCode, onRetry }: { error: string; errorCode?: string; onRetry: () => void }) {
+function FailedImageCard({ error, errorCode, model, onRetry }: { error: string; errorCode?: string; model?: string; onRetry: () => void }) {
     const { t } = useTranslation();
-    const insufficientBalance = errorCode === "insufficient_balance";
+    const display = humanizeGenerationError(error, t("workbench.generationFailed"), model);
+    const insufficientBalance = errorCode === "insufficient_balance" || display === t("generation.errors.insufficientBalance");
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
                 <div className="text-sm font-medium text-red-600 dark:text-red-300">{t("workbench.failed")}</div>
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
-                    {error}
+                    {display}
                 </Typography.Paragraph>
             </div>
             <div className="flex justify-end gap-2 border-t border-red-200 p-3 dark:border-red-950">

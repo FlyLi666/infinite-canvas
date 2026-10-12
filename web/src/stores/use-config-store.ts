@@ -78,11 +78,12 @@ const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 // persist.merge runs synchronously inside create(); these must be initialized first.
 export const YANLU_CHANNEL_ID = "yanlu";
 export const YANLU_CHANNEL_NAME = "研路AI";
-const YANLU_IMAGE_MODEL_NAME = "gpt-image-2";
+const YANLU_IMAGE_MODEL_NAME = "gpt-image-2.5-flare";
 const YANLU_VIDEO_MODEL_NAME = "grok-imagine-video-1.5";
 const YANLU_TEXT_MODEL_NAME = "gpt-5.6-sol";
 const YANLU_MANAGED_MODELS: ChannelModel[] = [
-    { name: "gpt-image-2", capability: "image" },
+    { name: "gpt-image-2.5-flare", capability: "image" },
+    { name: "gpt-image-2.5-sunburst", capability: "image" },
     { name: "grok-imagine-image-2.0", capability: "image" },
     { name: "grok-imagine-video-1.5", capability: "video" },
     { name: "seedance-2.0", capability: "video" },
@@ -98,7 +99,8 @@ export function grokImageModelPatch(model: string, size?: string) {
 }
 
 const MODEL_CATALOG_KEYS: Record<string, string> = {
-    "gpt-image-2": "gptImage2",
+    "gpt-image-2.5-flare": "gptImage25Flare",
+    "gpt-image-2.5-sunburst": "gptImage25Sunburst",
     "grok-imagine-image": "grokImagineImage",
     "grok-imagine-image-quality": "grokImagineImageQuality",
     "grok-imagine-image-2.0": "grokImagineImage20",
@@ -127,8 +129,8 @@ export const defaultConfig: AiConfig = {
             models: YANLU_MANAGED_MODELS,
         },
     ],
-    model: "yanlu::gpt-image-2",
-    imageModel: "yanlu::gpt-image-2",
+    model: "yanlu::gpt-image-2.5-flare",
+    imageModel: "yanlu::gpt-image-2.5-flare",
     videoModel: "yanlu::grok-imagine-video-1.5",
     textModel: "yanlu::gpt-5.6-sol",
     videoSeconds: "6",
@@ -138,7 +140,8 @@ export const defaultConfig: AiConfig = {
     systemPrompt: "",
     reasoningEffort: "auto",
     models: [
-        "yanlu::gpt-image-2",
+        "yanlu::gpt-image-2.5-flare",
+        "yanlu::gpt-image-2.5-sunburst",
         "yanlu::grok-imagine-image-2.0",
         "yanlu::grok-imagine-video-1.5",
         "yanlu::seedance-2.0",

@@ -33,7 +33,7 @@ export default {
     },
     settingsPanels: {
         common: { auto: "自动", low: "低", medium: "中", high: "高", xhigh: "极高" },
-        image: { title: "图像设置", quality: "质量", size: "尺寸", align16: "16 倍数对齐", align16Hint: "输入完成后自动向上补成 16 的倍数", aspectRatio: "宽高比", transparent: "透明背景", transparentHint: "开启后生成无背景的透明图像（仅部分模型可用）", count: "生成张数", images: "{{count}} 张" },
+        image: { title: "图像设置", quality: "质量", resolution: "画质", size: "尺寸", align16: "16 倍数对齐", align16Hint: "输入完成后自动向上补成 16 的倍数", aspectRatio: "宽高比", transparent: "透明背景", transparentHint: "开启后生成无背景的透明图像（仅部分模型可用）", count: "生成张数", images: "{{count}} 张", upscale: "超分", native: "原生", pricePerImage: "${{price}}/张", tiers: { "1k": "1K", "2k": "2K", "4k": "4K" } },
         video: { title: "视频设置", quality: "清晰度", size: "尺寸", seconds: "秒数", resolution: "分辨率", ratio: "比例", duration: "时长", smart: "智能", output: "输出", generateAudio: "生成声音", watermark: "添加水印", adaptive: "自适应", sizes: { landscape: "横屏", portrait: "竖屏", square: "方形", widescreen: "宽屏", tall: "长图", auto: "自动" }, ratios: { landscape: "横屏", portrait: "竖屏", square: "方形", standardLandscape: "标准横屏", standardPortrait: "标准竖屏", cinematic: "宽银幕", adaptive: "自适应" } },
         audio: { title: "音频设置", voice: "声音", format: "格式", speed: "语速", instructions: "声音指令", instructionsPlaceholder: "例如：自然、温暖、适合旁白。" },
         text: { title: "文本设置", reasoning: "推理强度", count: "生成次数" },
@@ -44,7 +44,8 @@ export default {
             addFirst: "请先登录研路AI账号",
             capabilities: { image: "生图", video: "视频", text: "文本", audio: "音频" },
             catalog: {
-                gptImage2: { name: "GPT 生图", hint: "$2.3/张 · 文字和改图最强" },
+                gptImage25Flare: { name: "2.5快速", hint: "出图更快" },
+                gptImage25Sunburst: { name: "2.5稳定", hint: "更精细" },
                 grokImagineImage: { name: "GROK 快速", hint: "先出草稿，快但不精" },
                 grokImagineImageQuality: { name: "GROK 写实", hint: "人像更像照片，不能改图" },
                 grokImagineImage20: { name: "GROK 2.0", hint: "1K $1.2 / 2K $2.2 · 会排版会改图" },
@@ -72,6 +73,10 @@ export default {
             insufficientBalance: "余额不足，请充值",
             modelNotAllowed: "当前不能使用该模型",
             serviceUnavailable: "服务暂时不可用，请稍后重试",
+            gptFailedTryGrok: "额度已退回，请尝试用 GROK 生图",
+            contentModeration: "内容未通过审核，请换个描述再试",
+            imageRequired: "缺少参考图，请连上图片再试",
+            generationFailedRetry: "生成失败，请稍后重试",
         },
     },
     auth: {

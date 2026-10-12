@@ -224,8 +224,12 @@ async function completeVideoFromTask(config: AiConfig, task: VideoGenerationTask
     const reachable = Boolean(url && isBrowserReachableMediaUrl(url, extraHosts));
 
     if (url || finished) {
-        const blob = await fetchVideoContent(config, task.id, options);
-        if (blob) return { status: "completed", result: { blob } };
+        const tries = finished ? 4 : 1;
+        for (let attempt = 0; attempt < tries; attempt += 1) {
+            if (attempt > 0) await delay(1500, options?.signal);
+            const blob = await fetchVideoContent(config, task.id, options);
+            if (blob) return { status: "completed", result: { blob } };
+        }
     }
 
     if (reachable && url) {

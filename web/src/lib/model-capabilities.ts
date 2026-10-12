@@ -42,7 +42,20 @@ const GPT_IMAGE_SIZE_FALLBACK: Record<string, string> = {
 export const GROK_VIDEO_ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"] as const;
 
 const GPT_QUALITY = ["auto", "high", "medium", "low"];
+const GPT_IMAGE_25_QUALITY = ["1k", "2k", "4k"];
 const GROK_IMAGE_2_QUALITY = ["low", "medium"];
+
+export type GptImage25Tier = "1k" | "2k" | "4k";
+export type GptImage25Pipeline = "upscale" | "native";
+
+const GPT_IMAGE_25_LONG_EDGE: Record<GptImage25Tier, number> = { "1k": 1024, "2k": 2048, "4k": 3840 };
+/** 按画质档位标价；超分/原生同价，避免旧 pipeline 状态显示旧价。 */
+const GPT_IMAGE_25_PRICE: Record<GptImage25Tier, Record<GptImage25Pipeline, number>> = {
+    "1k": { native: 4, upscale: 4 },
+    "2k": { upscale: 6, native: 6 },
+    "4k": { upscale: 8, native: 8 },
+};
+const GPT_IMAGE_25_ASPECTS = ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"] as const;
 
 const OPEN: ModelCapabilities = {
     quality: true,
@@ -64,6 +77,24 @@ const OPEN: ModelCapabilities = {
 const GPT_IMAGE_2: ModelCapabilities = {
     quality: true,
     qualityValues: GPT_QUALITY,
+    transparentBackground: true,
+    maxCount: 15,
+    imageSizeTiers: ["base"],
+    sizeFallback: GPT_IMAGE_SIZE_FALLBACK,
+    videoResolutions: [],
+    videoResolutionCustom: false,
+    videoSeconds: [],
+    videoSecondsMin: 1,
+    videoSecondsMax: 20,
+    videoGenerateAudio: false,
+    videoCustomPixels: false,
+    grokVideoApi: false,
+};
+
+/** GPT Image 2.5：画质三档决定长边，宽高比只留基础比例（不要 (2k)/(4k) 后缀按钮）。 */
+const GPT_IMAGE_25: ModelCapabilities = {
+    quality: true,
+    qualityValues: GPT_IMAGE_25_QUALITY,
     transparentBackground: true,
     maxCount: 15,
     imageSizeTiers: ["base"],
@@ -154,6 +185,8 @@ const SEEDANCE_25: ModelCapabilities = {
 
 const BY_NAME: Record<string, ModelCapabilities> = {
     "gpt-image-2": GPT_IMAGE_2,
+    "gpt-image-2.5-flare": GPT_IMAGE_25,
+    "gpt-image-2.5-sunburst": GPT_IMAGE_25,
     "grok-imagine-image": GROK_IMAGE,
     "grok-imagine-image-quality": GROK_IMAGE,
     "grok-imagine-image-2.0": GROK_IMAGE_2,
@@ -184,12 +217,12 @@ export function isGrokImagineImageModel(value: string) {
 
 export function supportsImageEdit(model: string) {
     const name = capabilityModelName(model);
-    return name === "gpt-image-2" || name === "grok-imagine-image-2.0" || name === "grok-imagine-edit";
+    return name === "gpt-image-2" || isGptImage25Model(model) || name === "grok-imagine-image-2.0" || name === "grok-imagine-edit";
 }
 
 export function preferredImageEditModel(model: string) {
     const name = capabilityModelName(model);
-    if (name === "gpt-image-2" || name === "grok-imagine-image-2.0") return model;
+    if (name === "gpt-image-2" || isGptImage25Model(model) || name === "grok-imagine-image-2.0") return model;
     if (!isGrokImagineImageModel(model)) return model;
     const separator = model.indexOf("::");
     return separator >= 0 ? `${model.slice(0, separator + 2)}grok-imagine-image-2.0` : "grok-imagine-image-2.0";
@@ -204,6 +237,10 @@ export function preferredListedModel(model: string, options: string[]) {
 }
 
 export function fallbackImageQualityForModel(model: string, quality: string) {
+    if (isGptImage25Model(model)) {
+        const parsed = parseGptImage25Quality(quality);
+        return formatGptImage25Quality(parsed.tier, "native");
+    }
     const values = modelCapabilities(model).qualityValues;
     if (!values.length) return "";
     const current = (quality || "").trim().toLowerCase();
@@ -216,8 +253,67 @@ export function isGrokImagineVideoModel(value: string) {
     return modelCapabilities(value).grokVideoApi;
 }
 
+export function isGptImage25Model(value: string) {
+    const name = capabilityModelName(value);
+    return name === "gpt-image-2.5-flare" || name === "gpt-image-2.5-sunburst";
+}
+
+/** 含旧 gpt-image-2 与两档 2.5；失败兜底文案共用。 */
 export function isGptImage2Model(value: string) {
-    return capabilityModelName(value) === "gpt-image-2";
+    const name = capabilityModelName(value);
+    return name === "gpt-image-2" || isGptImage25Model(value) || name.startsWith("gpt-image-");
+}
+
+export function parseGptImage25Quality(quality: string): { tier: GptImage25Tier; pipeline: GptImage25Pipeline } {
+    const raw = (quality || "").trim().toLowerCase();
+    const [tierPart, pipelinePart] = raw.split("+");
+    const tier: GptImage25Tier = tierPart === "2k" || tierPart === "4k" || tierPart === "1k" ? tierPart : tierPart === "high" ? "4k" : tierPart === "medium" ? "2k" : "1k";
+    const pipeline: GptImage25Pipeline = pipelinePart === "native" ? "native" : "upscale";
+    return { tier, pipeline };
+}
+
+export function formatGptImage25Quality(tier: GptImage25Tier, pipeline: GptImage25Pipeline) {
+    return `${tier}+${pipeline}`;
+}
+
+/** 前端不再暴露超分/原生；请求固定 native，后端按档位扣 4/6/8。 */
+export function gptImage25RequestPipeline(_tier?: GptImage25Tier, _pipeline?: GptImage25Pipeline): GptImage25Pipeline {
+    return "native";
+}
+
+export function gptImage25Price(tier: GptImage25Tier, pipeline: GptImage25Pipeline = "native") {
+    return GPT_IMAGE_25_PRICE[tier][pipeline];
+}
+
+export function gptImage25AspectFromSize(size: string) {
+    const value = (size || "").trim();
+    if (GPT_IMAGE_25_ASPECTS.includes(value as (typeof GPT_IMAGE_25_ASPECTS)[number])) return value;
+    const tagged = value.match(/^(\d+:\d+)(?:-2k|-4k)?$/i);
+    if (tagged && GPT_IMAGE_25_ASPECTS.includes(tagged[1] as (typeof GPT_IMAGE_25_ASPECTS)[number])) return tagged[1];
+    const pixels = value.match(/^(\d+)x(\d+)$/i);
+    if (!pixels) return "1:1";
+    const width = Number(pixels[1]);
+    const height = Number(pixels[2]);
+    if (!width || !height) return "1:1";
+    const current = width / height;
+    return GPT_IMAGE_25_ASPECTS.reduce((best, ratio) => {
+        const [w, h] = ratio.split(":").map(Number);
+        const [bw, bh] = best.split(":").map(Number);
+        return Math.abs(w / h - current) < Math.abs(bw / bh - current) ? ratio : best;
+    });
+}
+
+/** 长边由画质档决定，短边按比例向上取 16 倍数；保证最长边落在后端 1K/2K/4K 分档。 */
+export function gptImage25PixelSize(tier: GptImage25Tier, size: string) {
+    const aspect = gptImage25AspectFromSize(size);
+    const [ratioW, ratioH] = aspect.split(":").map(Number);
+    const longSide = GPT_IMAGE_25_LONG_EDGE[tier];
+    const landscape = ratioW >= ratioH;
+    const longRatio = landscape ? ratioW / ratioH : ratioH / ratioW;
+    const shortSide = Math.ceil(longSide / longRatio / 16) * 16;
+    const width = landscape ? longSide : shortSide;
+    const height = landscape ? shortSide : longSide;
+    return `${width}x${height}`;
 }
 
 export function fallbackImageSizeForModel(model: string, size: string) {

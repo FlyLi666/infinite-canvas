@@ -4,7 +4,20 @@ import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { clampImageCount, fallbackImageQualityForModel, fallbackImageSizeForModel, filterImageAspects, modelCapabilities } from "@/lib/model-capabilities";
+import {
+    clampImageCount,
+    fallbackImageQualityForModel,
+    fallbackImageSizeForModel,
+    filterImageAspects,
+    formatGptImage25Quality,
+    gptImage25AspectFromSize,
+    gptImage25PixelSize,
+    gptImage25Price,
+    isGptImage25Model,
+    modelCapabilities,
+    parseGptImage25Quality,
+    type GptImage25Tier,
+} from "@/lib/model-capabilities";
 import { type AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
@@ -13,6 +26,7 @@ const qualityOptions = [
     { value: "medium", labelKey: "medium" },
     { value: "low", labelKey: "low" },
 ];
+const GPT_IMAGE_25_TIERS: GptImage25Tier[] = ["1k", "2k", "4k"];
 const DIMENSION_STEP = 16;
 
 const aspectOptions = [
@@ -49,19 +63,28 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const model = config.model || config.imageModel;
     const caps = modelCapabilities(model);
+    const gpt25 = isGptImage25Model(model);
     const countCap = Math.min(maxCount, caps.maxCount);
     const quality = config.quality || "auto";
+    const gpt25Quality = gpt25 ? parseGptImage25Quality(quality) : null;
     const count = clampImageCount(model, Number(config.count) || 1, maxCount);
     const activeSize = config.size || "auto";
     const visibleAspects = filterImageAspects(model, aspectOptions);
     const visibleQualities = qualityOptions.filter((item) => !caps.qualityValues.length || caps.qualityValues.includes(item.value));
     const transparentBackground = config.background === "transparent";
-    const selectedAspect = visibleAspects.find((item) => (item.size || item.value) === activeSize || item.value === activeSize) || visibleAspects[0];
+    const selectedAspect = gpt25
+        ? visibleAspects.find((item) => item.value === gptImage25AspectFromSize(activeSize)) || visibleAspects[0]
+        : visibleAspects.find((item) => (item.size || item.value) === activeSize || item.value === activeSize) || visibleAspects[0];
 
     useEffect(() => {
+        if (gpt25) {
+            const nextSize = gptImage25PixelSize(parseGptImage25Quality(quality).tier, activeSize);
+            if (nextSize !== activeSize) onConfigChange("size", nextSize);
+            return;
+        }
         const next = fallbackImageSizeForModel(model, activeSize);
         if (next !== activeSize) onConfigChange("size", next);
-    }, [activeSize, model, onConfigChange]);
+    }, [activeSize, gpt25, model, onConfigChange, quality]);
     useEffect(() => {
         if (!caps.quality) return;
         const next = fallbackImageQualityForModel(model, quality);
@@ -75,6 +98,10 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     }, [caps.transparentBackground, config.background, onConfigChange]);
     const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
     const selectAspect = (value: string) => {
+        if (gpt25 && gpt25Quality) {
+            onConfigChange("size", gptImage25PixelSize(gpt25Quality.tier, value));
+            return;
+        }
         const option = aspectOptions.find((item) => item.value === value);
         onConfigChange("size", option?.size || option?.value || "auto");
     };
@@ -83,6 +110,11 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
         const width = key === "width" ? next : dimensions.width;
         const height = key === "height" ? next : dimensions.height;
         onConfigChange("size", `${alignDimension(width, snapDimensionToStep)}x${alignDimension(height, snapDimensionToStep)}`);
+    };
+    const setGpt25Tier = (tier: GptImage25Tier) => {
+        if (!gpt25Quality) return;
+        onConfigChange("quality", formatGptImage25Quality(tier, "native"));
+        onConfigChange("size", gptImage25PixelSize(tier, activeSize));
     };
 
     return (
@@ -97,7 +129,21 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 }}
             >
                 {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.image.title")}</div> : null}
-                {caps.quality ? (
+                {gpt25 && gpt25Quality ? (
+                    <div className="space-y-2.5">
+                        <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.resolution")}</SettingTitle>
+                        <div className="grid grid-cols-3 gap-2.5">
+                            {GPT_IMAGE_25_TIERS.map((tier) => (
+                                <OptionPill key={tier} selected={gpt25Quality.tier === tier} theme={theme} onClick={() => setGpt25Tier(tier)}>
+                                    <span className="inline-flex items-center justify-center gap-1">
+                                        <span>{t(`settingsPanels.image.tiers.${tier}`)}</span>
+                                        <span className="tabular-nums text-xs opacity-80">{t("settingsPanels.image.pricePerImage", { price: gptImage25Price(tier) })}</span>
+                                    </span>
+                                </OptionPill>
+                            ))}
+                        </div>
+                    </div>
+                ) : caps.quality ? (
                     <div className="space-y-2.5">
                         <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.quality")}</SettingTitle>
                         <div className="grid grid-cols-4 gap-2.5">
@@ -109,24 +155,26 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </div>
                     </div>
                 ) : null}
-                <div className="space-y-2.5">
-                    <div className="flex items-center justify-between gap-3">
-                        <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.size")}</SettingTitle>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium" style={{ color: theme.node.muted }}>
-                                {t("settingsPanels.image.align16")}
-                            </span>
-                            <span title={t("settingsPanels.image.align16Hint")} onMouseDown={(event) => event.stopPropagation()}>
-                                <Switch size="small" checked={snapDimensionToStep} onChange={setSnapDimensionToStep} />
-                            </span>
+                {!gpt25 ? (
+                    <div className="space-y-2.5">
+                        <div className="flex items-center justify-between gap-3">
+                            <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.size")}</SettingTitle>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium" style={{ color: theme.node.muted }}>
+                                    {t("settingsPanels.image.align16")}
+                                </span>
+                                <span title={t("settingsPanels.image.align16Hint")} onMouseDown={(event) => event.stopPropagation()}>
+                                    <Switch size="small" checked={snapDimensionToStep} onChange={setSnapDimensionToStep} />
+                                </span>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
+                            <DimensionInput prefix="W" value={dimensions.width} disabled={activeSize === "auto"} theme={theme} alignToStep={snapDimensionToStep} onChange={(value) => updateDimension("width", value)} />
+                            <span className="text-lg opacity-45">↔</span>
+                            <DimensionInput prefix="H" value={dimensions.height} disabled={activeSize === "auto"} theme={theme} alignToStep={snapDimensionToStep} onChange={(value) => updateDimension("height", value)} />
                         </div>
                     </div>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
-                        <DimensionInput prefix="W" value={dimensions.width} disabled={activeSize === "auto"} theme={theme} alignToStep={snapDimensionToStep} onChange={(value) => updateDimension("width", value)} />
-                        <span className="text-lg opacity-45">↔</span>
-                        <DimensionInput prefix="H" value={dimensions.height} disabled={activeSize === "auto"} theme={theme} alignToStep={snapDimensionToStep} onChange={(value) => updateDimension("height", value)} />
-                    </div>
-                </div>
+                ) : null}
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.aspectRatio")}</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
@@ -188,10 +236,18 @@ export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; ch
 }
 
 export function imageQualityLabel(value: string) {
+    if (["1k", "2k", "4k"].includes(value.split("+")[0])) {
+        const tier = parseGptImage25Quality(value).tier;
+        return i18n.t(`settingsPanels.image.tiers.${tier}`);
+    }
     return (["auto", "high", "medium", "low"].includes(value) ? i18n.t(`settingsPanels.common.${value}`) : value);
 }
 
 export function imageSizeLabel(size: string) {
+    if (/^\d+x\d+$/i.test(size)) {
+        const aspect = gptImage25AspectFromSize(size);
+        return aspectOptions.find((item) => item.value === aspect)?.label || size;
+    }
     return aspectOptions.find((item) => (item.size || item.value) === size || item.value === size)?.label || size;
 }
 

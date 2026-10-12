@@ -24,6 +24,7 @@ The current release needs manual verification in these areas:
 - Grok image on canvas (the reported vanish): after generation the node must show the actual picture (local bytes), not shrink to a speck, snap back to “empty image”, or sit on an unopenable overseas link. GPT Image 2 on the same canvas must still work.
 
 - Grok video on canvas: the player must play from bytes streamed through the Asia near-node (`/videos/{id}/content`) and stored locally — not from an overseas host, and not from our own image bucket. If that hop also fails, show a human error — do not leave a black “successful” player. Download must not freeze the page. A local file still downloads; leftover remote-only URLs open a new tab. Ship this with the near-node change: CPA `/content` is 404, so the near-node must fetch the official URL and stream it back.
+- Grok image-to-video on a China network: after status is `done`, a single failed `/videos/{id}/content` must not immediately become `mediaUnreachable`. The canvas should retry content a few times and land a local playable blob (`ftyp` / mp4). Same-canvas Grok image generation must still show a local picture. Do not write the video to R2 / `img.flyli.cn`.
 
 - Image-to-image after the URL change: connect a Grok result node to a new/empty image node, prompt something like “add a monster”, GROK 2.0. The target should leave “Generating”, not stay empty with a stuck Stop button. GPT edit from an `img.flyli.cn` result should still upload the file as multipart.
 
@@ -94,5 +95,9 @@ The current release needs manual verification in these areas:
 - Workbench history image cleanup: after generating content in the image or video workbench, deleting an asset, canvas image node, canvas content, or canvas project must not remove thumbnails, results, or references from generation history; deleting a generation record should still remove its dedicated local files.
 - Settings import/export and WebDAV-related configuration.
 - Local storage settings: the Settings page should provide a Local storage tab that reads only the `infinite-canvas` database and shows IndexedDB usage, total site usage, browser quota, quota percentage, and per-object-store record counts and content size; refreshing after local data changes should update the figures without blocking the rest of the page.
+
+- GPT Image generate/edit failures on canvas: for unknown errors (502/524 Chinese, `auth_unavailable`, `generation_failed`, Cloudflare English, etc.), the node red text and the same toast must read **「额度已退回，请尝试用 GROK 生图」** (English: credits refunded, try GROK). `INVALID_API_KEY` / `INSUFFICIENT_BALANCE` / `MODEL_NOT_ALLOWED` must keep their existing copy. GROK image, text, and video failures must not show this sentence.
+
+- Generation failure copy: GPT Image 524 / `auth_unavailable` → GROK refund sentence on both canvas and the image workbench. GROK Image 524 / `auth_unavailable` → **「服务暂时不可用，请稍后重试」** with no HTTP code and no English. GROK moderation English (`respect_moderation` / rejected by content) → **「内容未通过审核，请换个描述再试」**. GROK `image is required` → **「缺少参考图，请连上图片再试」**. Insufficient balance must stay the balance sentence.
 
 The Chinese version contains the complete item-by-item acceptance checklist.
